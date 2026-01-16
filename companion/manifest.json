@@ -1,0 +1,26 @@
+{
+	"id": "companion-module-Bob-TinyCountDown",
+	"name": "companion-module-Bob-TinyCountDown",
+	"shortname": "Bob-TinyCountDown",
+	"description": "A simple countdown module for Bitfocus Companion with TCP communication",
+	"version": "1.6.6",
+	"license": "MIT",
+	"repository": "git+https://github.com/bitfocus/companion-module-Bob-TinyCountDown.git",
+	"bugs": "https://github.com/bitfocus/companion-module-Bob-TinyCountDown/issues",
+	"maintainers": [
+		{
+			"name": "Bob",
+			"email": "MRBOOCN@QQ.COM"
+		}
+	],
+	"runtime": {
+		"type": "node22",
+		"api": "nodejs-ipc",
+		"apiVersion": "0.0.0",
+		"entrypoint": "../main.js"
+	},
+	"legacyIds": ["companion-module-tinycountdown"],
+	"manufacturer": "Bob",
+	"products": ["TinyCountDown"],
+	"keywords": ["countdown", "timer", "clock", "tcp"]
+}
