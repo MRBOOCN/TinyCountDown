@@ -1,150 +1,303 @@
-# Bob:TinyCountDown Companion 模块
+# Bitfocus Companion Module for TinyCountdown
 
-## 作者
+这是一个专为 [Bitfocus Companion](https://bitfocus.no/companion) 开发的模块，用于控制 **TinyCountdown** 倒计时应用程序。
 
-Bob
+## 功能特性
 
-## 版本
+### 支持的功能
 
-1.6.6
+- ✅ **倒计时控制**
+  - 开始/停止/暂停倒计时（支持切换/单独开始/单独停止）
+  - 重置倒计时
+  - 设置自定义时间（时/分/秒）
+  - 增加/减少时间（合并为一个动作）
+  
+- ✅ **显示控制**
+  - 切换/开启/关闭文本闪烁模式
+  - 切换/开启/关闭窗口置顶
+  - 切换/开启/关闭全屏模式
+  - 切换/显示/隐藏窗口可见性（迷你模式）
+  
+- ✅ **状态监控**
+  - 实时获取倒计时状态
+  - WebSocket 心跳保持连接
+  - 自动重连机制
+  
+- ✅ **变量追踪**
+  - 运行状态
+  - 剩余时间
+  - 总时间
+  - 格式化时间显示
+  - 各种开关状态
+  
+- ✅ **反馈条件**
+  - 运行状态反馈
+  - 暂停状态反馈
+  - 时间阈值警告
+  - 显示模式反馈
+  
+- ✅ **预设按钮**
+  - 开始/停止切换按钮
+  - 重置按钮
+  - 显示控制按钮组
 
-## 描述
+## 系统要求
 
-此模块通过TCP通信提供与TinyCountDown的集成，允许您从Companion控制和监控倒计时功能。
+- **Companion**: v2.0 或更高版本
+- **Node.js**: v18 或更高版本
+- **TinyCountdown**: v1.6.6 或更高版本
 
-## TCP命令
+## 安装方法
 
-### 命令列表
+### 方法一：开发模式安装
 
-| 命令        | 描述             | 参数        | 预期响应 |
-| ----------- | ---------------- | ----------- | -------- |
-| start+      | 启动倒计时       | 无          | 状态更新 |
-| start-      | 停止倒计时       | 无          | 状态更新 |
-| time=\*     | 设置倒计时时间   | 秒数 (整数) | 状态更新 |
-| fullscreen+ | 启用全屏模式     | 无          | 状态更新 |
-| fullscreen- | 禁用全屏模式     | 无          | 状态更新 |
-| top+        | 启用始终置顶模式 | 无          | 状态更新 |
-| top-        | 禁用始终置顶模式 | 无          | 状态更新 |
-| Blink+      | 启用闪烁功能     | 无          | 状态更新 |
-| Blink-      | 禁用闪烁功能     | 无          | 状态更新 |
-| mini+       | 显示窗口         | 无          | 状态更新 |
-| mini-       | 隐藏窗口         | 无          | 状态更新 |
-| PING        | 心跳             | 无          | PONG     |
+1. **克隆模块到本地**
+   ```bash
+   cd d:\Desktop\TinyCountdown v1.6.6 v2-5\companion-module-tinycountdown
+   ```
 
-### 错误处理
+2. **安装依赖**
+   ```bash
+   npm install
+   ```
 
-| 错误类型 | 描述                    | 响应格式         |
-| -------- | ----------------------- | ---------------- |
-| 连接错误 | 无法连接到TinyCountDown | 日志中的错误消息 |
-| 命令错误 | 发送命令失败            | 日志中的错误消息 |
-| 状态错误 | 解析状态响应失败        | 日志中的错误消息 |
+3. **打包模块**
+   ```bash
+   npx companion-module-build
+   ```
 
-## 变量
+4. **导入到 Companion**
+   - 打开 Companion 网页界面
+   - 进入 Connections 页面
+   - 点击 "Add Beta Module" 或 "Add Stable Module"
+   - 选择生成的 `.companion-module.zip` 文件
 
-### 可用变量
+### 方法二：手动安装
 
-| 变量                            | 描述                       |
-| ------------------------------- | -------------------------- |
-| countdown_running               | 倒计时运行中               |
-| countdown_paused                | 倒计时已暂停               |
-| countdown_remaining_time        | 倒计时剩余时间（秒）       |
-| connection_status               | 连接状态                   |
-| countdown_remaining_time_mmss   | 倒计时剩余时间（分:秒）    |
-| countdown_remaining_time_hhmmss | 倒计时剩余时间（时:分:秒） |
-| start_stop_status               | 启动/停止状态              |
-| top_status                      | 置顶状态                   |
-| fullscreen_status               | 全屏状态                   |
-| blink_status                    | 闪烁状态                   |
-| port_number                     | 端口号                     |
+1. 将编译后的模块文件夹复制到 Companion 的模块目录：
+   - Windows: `%APPDATA%\companion\modules\`
+   - macOS: `~/Library/Application Support/companion/modules/`
+   - Linux: `~/.config/companion/modules/`
 
-## 反馈
+2. 重启 Companion
 
-### 可用反馈
+## 配置说明
 
-| 反馈                            | 描述                             |
-| ------------------------------- | -------------------------------- |
-| countdown_running               | 指示倒计时是否正在运行           |
-| countdown_paused                | 指示倒计时是否已暂停             |
-| countdown_complete              | 指示倒计时是否已完成             |
-| countdown_time_remaining        | 以秒为单位显示剩余时间           |
-| connection_status               | 指示是否已连接到TinyCountDown    |
-| connection_status_text          | 显示详细的连接状态               |
-| time_remaining_warning          | 当剩余时间低于阈值时指示         |
-| countdown_remaining_time_mmss   | 以分:秒格式显示倒计时剩余时间    |
-| countdown_remaining_time_hhmmss | 以时:分:秒格式显示倒计时剩余时间 |
-| countdown_remaining_time        | 以秒为单位显示倒计时剩余时间     |
-| start_stop_status               | 显示启动/停止状态                |
-| top_status                      | 显示置顶功能状态                 |
-| top_status_text                 | 以文本形式显示置顶功能状态       |
-| fullscreen_status               | 显示全屏模式状态                 |
-| fullscreen_status_text          | 以文本形式显示全屏模式状态       |
-| blink_status                    | 显示闪烁效果状态                 |
-| blink_status_text               | 以文本形式显示闪烁效果状态       |
-| port_number                     | 显示当前通信端口号               |
+在 Companion 的 Connections 页面添加 TinyCountdown 模块后，需要配置以下参数：
 
-## 配置
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| Host | TinyCountdown 服务器的 IP 地址或主机名 | localhost |
+| Port | WebSocket 端口号（0 = 自动检测） | 0 |
+| Auto Reconnect | 断线后自动重连 | ✓ |
+| Debug Messages | 记录所有消息日志 | ✗ |
+| Reset Variables on Connect | 连接时重置变量 | ✓ |
 
-### 必填设置
+## 使用指南
 
-| 设置     | 描述                     | 默认值    |
-| -------- | ------------------------ | --------- |
-| 目标IP   | TinyCountDown的IP地址    | 127.0.0.1 |
-| 目标端口 | TinyCountDown的端口号    | 8080      |
-| 重连间隔 | 尝试重新连接的间隔（秒） | 5         |
-| 心跳间隔 | 发送心跳的间隔（秒）     | 10        |
+### Actions（动作）
 
-## 使用方法
+#### 倒计时控制
 
-1. 配置您的TinyCountDown实例的IP地址和端口
-2. 使用提供的操作来控制倒计时
-3. 使用提供的反馈来监控倒计时状态
-4. 使用提供的变量来显示倒计时信息
+1. **开始/停止** - 开始/停止倒计时（带下拉选项：切换/开始/停止）
+2. **重置倒计时** - 重置倒计时到初始时间
+3. **设置时间** - 设置倒计时时间（小时、分钟、秒）
+4. **时间+/-** - 增加/减少时间（带下拉选项：增加/减少，可设置时/分/秒）
+
+#### 显示控制
+
+5. **闪烁模式** - 闪烁模式（带下拉选项：切换/开启/关闭）
+6. **置顶** - 窗口置顶（带下拉选项：切换/开启/关闭）
+7. **全屏模式** - 全屏模式（带下拉选项：切换/开启/关闭）
+8. **显示/隐藏** - 窗口可见性（带下拉选项：切换/显示/隐藏）
+
+### Feedbacks（反馈）
+
+1. **开始/停止** - 根据运行状态改变按钮样式（绿色）
+2. **停止状态** - 未运行时改变按钮样式（红色）
+3. **运行状态** - 根据运行状态改变按钮样式
+4. **暂停状态** - 根据暂停状态改变按钮样式
+5. **闪烁模式** - 闪烁模式启用时改变样式（黄色）
+6. **窗口置顶** - 置顶启用时改变样式
+7. **全屏模式** - 全屏时改变样式
+8. **窗口可见** - 根据窗口可见性改变样式（绿色）
+9. **剩余时间** - 时间低于阈值时改变样式（红色警告，可配置阈值）
+
+### Variables（变量）
+
+可在按钮文本中使用的变量：
+
+- `$(tinycountdown:running)` - 运行状态（true/false）
+- `$(tinycountdown:paused)` - 暂停状态（true/false）
+- `$(tinycountdown:remainingTime)` - 剩余秒数
+- `$(tinycountdown:remainingTimeFormatted)` - 格式化剩余时间（HH:MM:SS）
+- `$(tinycountdown:totalTime)` - 总秒数
+- `$(tinycountdown:time)` - 格式化时间显示（MM:SS）
+- `$(tinycountdown:blink)` - 闪烁状态（true/false）
+- `$(tinycountdown:top)` - 置顶状态（true/false）
+- `$(tinycountdown:fullscreen)` - 全屏状态（true/false）
+- `$(tinycountdown:windowVisible)` - 窗口可见状态（true/false）
+- `$(tinycountdown:port)` - 服务器端口号
+
+### Presets（预设）
+
+模块内置了常用预设按钮：
+
+1. **开始/停止切换** - 开始/停止切换按钮（带状态指示）
+2. **重置** - 重置按钮
+3. **时间调整预设** - 快速增加/减少时间的预设按钮
+4. **闪烁切换** - 闪烁切换按钮（带状态灯）
+5. **置顶切换** - 置顶切换按钮（带状态灯）
+6. **全屏切换** - 全屏切换按钮（带状态灯）
+7. **窗口切换** - 窗口显示切换按钮（带状态灯）
+
+## 技术架构
+
+### WebSocket 通信
+
+模块通过 WebSocket 与 TinyCountdown 服务器通信：
+
+- **协议**: `ws://host:port/ws`
+- **心跳**: 每 10 秒发送 PING，期望收到 PONG
+- **消息格式**: 
+  - 命令：纯文本（如 `start`, `stop`, `reset`, `PING`）
+  - 响应：JSON 格式状态数据
+
+### 支持的命令格式
+
+```javascript
+// 倒计时控制
+'start'         // 开始倒计时
+'stop'          // 停止倒计时
+'reset'         // 重置倒计时
+
+// 时间设置
+'time=300'      // 设置为 300 秒
+'timeAdd=60'    // 增加 60 秒
+'timeSubtract=30' // 减少 30 秒
+
+// 显示控制
+'Blink_Toggle'     // 切换闪烁
+'Blink_Enabled'    // 开启闪烁
+'Blink_Disabled'   // 关闭闪烁
+'Top_Toggle'       // 切换置顶
+'Top_Enabled'      // 开启置顶
+'Top_Disabled'     // 关闭置顶
+'Fullscreen_Toggle'  // 切换全屏
+'Fullscreen_Enabled' // 开启全屏
+'Fullscreen_Disabled' // 关闭全屏
+'Show_Toggle'      // 切换窗口可见性
+'Show_Enabled'     // 显示窗口
+'Show_Disabled'    // 隐藏窗口
+
+// 其他命令
+'PING'           // 心跳
+```
+
+### 状态响应格式
+
+```json
+{
+  "type": "status",
+  "data": {
+    "running": true,
+    "paused": false,
+    "remainingTime": 300,
+    "totalTime": 300,
+    "blink": false,
+    "top": true,
+    "fullscreen": false,
+    "windowVisible": true,
+    "port": 8080
+  }
+}
+```
+
+### 数据处理
+
+- **数据标准化**：自动识别并统一不同格式的状态数据
+- **数据验证**：验证数据类型和逻辑正确性（如剩余时间不能为负数）
+- **向下取整**：时间数据使用 Math.floor() 向下取整，避免四舍五入
+- **单一数据流**：所有状态更新来自软件端的主动推送，无需轮询
+- **自动修正**：检测到矛盾数据时自动修正（如运行时自动取消暂停状态）
 
 ## 故障排除
 
-### 常见问题
+### 无法连接
 
-1. **连接失败**：确保TinyCountDown正在运行，并且IP地址和端口正确
-2. **命令不工作**：确保连接已建立，并且命令受您的TinyCountDown版本支持
-3. **时间不更新**：确保倒计时正在运行，并且连接稳定
+1. 确认 TinyCountdown 应用程序正在运行
+2. 检查 Web 服务器是否已启动
+3. 验证主机和端口配置是否正确
+4. 检查防火墙设置
 
-### 日志
+### 状态不更新
 
-检查Companion日志以获取详细的错误消息和调试信息。
+1. 检查 WebSocket连接状态
+2. 查看调试日志（启用 Debug Messages）
+3. 尝试手动请求状态更新（Get Status 动作）
 
-## 更新日志
+### 变量不更新
 
-### v1.6.6
+1. 确认已成功建立 WebSocket连接
+2. 检查是否启用了 "Reset Variables on Connect"
+3. 查看 Companion 日志中的错误信息
 
-- 将界面语言和所有用户可见文本设置为中文
-- 确保代码中的注释、文档说明等备注信息也全部采用中文编写
-- 完成本地化设置
+## 开发指南
 
-### v1.6.5
+### 本地开发
 
-- 更新模块名称为Bob:TinyCountDown
-- 更新版本号为1.6.5
-- 添加了全面的TCP命令文档
-- 改进了错误处理
+```bash
+# 安装依赖
+npm install
 
-### v1.6.4
+# 格式化代码
+npm run format
 
-- 修复错误和性能改进
+# 代码检查
+npm run lint
+```
 
-### v1.6.3
+### 项目结构
 
-- 修复错误和性能改进
+```
+companion-module-tinycountdown/
+├── companion/
+│   ├── HELP.md          # 帮助文档
+│   └── manifest.json    # 模块清单
+├── src/
+│   ├── main.js          # 主模块代码
+│   └── upgrade.js       # 升级脚本
+├── package.json         # 项目配置
+├── .gitignore          # Git 忽略规则
+└── README.md           # 说明文档
+```
 
-### v1.6.2
+## 贡献
 
-- 修复了倒计时同步问题
-- 改进了时间显示格式
+欢迎提交 Issue 和 Pull Request！
 
-### v1.6.1
+## 许可证
 
-- 添加了TCP通信支持
-- 添加了额外的反馈项
+MIT License
 
-### v1.6.0
+## 相关链接
 
-- 初始发布
+- [Bitfocus Companion 官网](https://bitfocus.no/companion)
+- [Companion 模块开发文档](https://companion.free/for-developers/module-development/module-development-101)
+- [TinyCountdown 项目](../)
+- [通用 WebSocket 模块参考](../companion-module-generic-websocket-master/)
+
+## 致谢
+
+- 基于 [companion-module-generic-websocket](https://github.com/bitfocus/companion-module-generic-websocket) 模块架构
+- 感谢 Bitfocus Companion 团队提供的优秀框架
+
+---
+
+**作者**: Bob
+**版本**: 1.6.6  
+**最后更新**: 2026 年 3 月 10 日
+
+---
+
+**TinyCountDown v1.6.6 © 2026 Bob. All Rights Reserved.**
