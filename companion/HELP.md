@@ -12,6 +12,8 @@ Bitfocus Companion 模块，用于控制 TinyCountdown 应用程序。
 - 切换窗口置顶
 - 切换全屏模式
 - 切换窗口可见性
+- **设置输出分辨率（1366x768 / 1920x1080 / 2560x1440 / 3840x2160 / Default）**
+- **切换 NDI 输出**
 - 实时状态监控
 - 倒计时状态变量追踪
 
@@ -20,7 +22,23 @@ Bitfocus Companion 模块，用于控制 TinyCountdown 应用程序。
 配置模块需要以下参数：
 - 主机 IP 地址或主机名（默认：localhost）
 - 端口号（默认：从 TinyCountdown.ini 读取）
+- 用户名和密码（与 TinyCountdown 后台密码一致，密码存储在设备密钥库中，非明文保存）
 - 自动重连选项
+
+### 认证机制
+
+- 模块通过 WebSocket 连接时携带 Token 进行身份认证
+- Token 由 TinyCountdown 服务器在认证成功后签发
+- 密码修改后，服务器会立即使所有现有 Token 失效，模块将自动重新认证
+- 密码存储在 Companion 设备密钥库中，不保存于配置文件
+
+### 重连机制
+
+- 支持指数退避自动重连，间隔依次为 200ms、500ms、1000ms、2000ms、5000ms
+- 连接关闭时代码为 1008 或原因为 `token/invalid` 时，立即清除 Token 并重新认证
+- Token 有效时优先使用快速重连路径，跳过认证步骤
+- Token 重连尝试上限为 2 次，超过后自动触发重新认证
+- 每次重连前清除旧的重连定时器，防止定时器堆积
 
 ## 动作
 
@@ -38,6 +56,10 @@ Bitfocus Companion 模块，用于控制 TinyCountdown 应用程序。
 - **切换全屏**：切换全屏模式
 - **切换窗口**：显示/隐藏窗口（迷你模式）
 
+### 输出控制
+- **分辨率**：设置输出分辨率，支持 Default、1366x768、1920x1080、2560x1440、3840x2160
+- **NDI 输出**：切换/开启/关闭 NDI 视频输出
+
 ## 反馈
 
 - **运行状态**：检查倒计时是否正在运行
@@ -47,12 +69,15 @@ Bitfocus Companion 模块，用于控制 TinyCountdown 应用程序。
 - **全屏状态**：检查是否处于全屏模式
 - **窗口可见**：检查窗口是否可见
 - **剩余时间**：检查剩余时间是否低于阈值
+- **分辨率状态**：检查当前是否处于指定分辨率
+- **NDI 输出**：检查 NDI 输出是否已启用
 
 ## 变量
 
 - `running`：当前运行状态（true/false）
 - `paused`：当前暂停状态（true/false）
 - `remainingTime`：剩余时间（秒）
+- `remainingTimeMs`：剩余时间（毫秒，用于高精度同步）
 - `totalTime`：总时间（秒）
 - `time`：格式化时间字符串（HH:MM:SS 或 MM:SS）
 - `blink`：闪烁模式状态（true/false）
@@ -60,16 +85,38 @@ Bitfocus Companion 模块，用于控制 TinyCountdown 应用程序。
 - `fullscreen`：全屏状态（true/false）
 - `windowVisible`：窗口可见性状态（true/false）
 - `port`：服务器端口号
+- `resolution`：分辨率索引（-1=Default, 0=1366x768, 1=1920x1080, 2=2560x1440, 3=3840x2160）
+- `resolutionLabel`：分辨率可读标签（如 `1920 x 1080`）
+- `ndi`：NDI 输出状态（true/false）
 - `lastDataReceived`：最后接收数据的时间戳
 
 ## 预设按钮
 
 内置了常用操作的预设按钮：
-- 开始/停止切换按钮
-- 重置按钮
-- 时间调整预设
-- 显示控制切换按钮
+- **开始/停止切换按钮**：运行时显示绿色背景黑色文字，停止时显示红色背景白色文字
+- **重置按钮**
+- **时间调整预设**
+- **显示控制切换按钮**
+- **分辨率预设按钮组**：
+  - 动态标签按钮，实时显示当前分辨率 `$(Tinycountdown:resolutionLabel)`
+  - Default、1366x768、1920x1080、2560x1440、3840x2160 五个分辨率选择按钮
+  - 所有分辨率按钮字体大小统一为 12pt
+- **NDI 切换按钮**
+
+## 常用命令格式
+
+```text
+start                    // 开始倒计时
+stop                     // 停止/暂停倒计时
+reset                    // 重置倒计时
+time=300                 // 设置时间为 300 秒
+timeAdd=60               // 增加 60 秒
+timeSubtract=30          // 减少 30 秒
+Resolution_Set?index=1   // 设置分辨率为 1920x1080
+NDI_Set?enabled=true     // 开启 NDI 输出
+NDI_Set?enabled=false    // 关闭 NDI 输出
+```
 
 ---
 
-**TinyCountDown v1.6.6 © 2026 Bob. All Rights Reserved.**
+**TinyCountDown v1.6.7 © 2026 Bob. All Rights Reserved.**

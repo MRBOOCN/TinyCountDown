@@ -18,16 +18,25 @@
   - 切换/开启/关闭全屏模式
   - 切换/显示/隐藏窗口可见性（迷你模式）
   
+- ✅ **输出控制**
+  - 设置输出分辨率：Default、1366x768、1920x1080、2560x1440、3840x2160
+  - 切换/开启/关闭 NDI 视频输出
+  
 - ✅ **状态监控**
   - 实时获取倒计时状态
   - WebSocket 心跳保持连接
-  - 自动重连机制
+  - 自动重连机制（指数退避，间隔 200ms/500ms/1000ms/2000ms/5000ms）
+  - Token 认证与自动续期
+  - 密码修改后自动重新认证
   
 - ✅ **变量追踪**
   - 运行状态
+  - 暂停状态
   - 剩余时间
   - 总时间
   - 格式化时间显示
+  - 分辨率索引及可读标签
+  - NDI 输出状态
   - 各种开关状态
   
 - ✅ **反馈条件**
@@ -35,17 +44,22 @@
   - 暂停状态反馈
   - 时间阈值警告
   - 显示模式反馈
+  - 分辨率状态反馈
+  - NDI 输出状态反馈
   
 - ✅ **预设按钮**
-  - 开始/停止切换按钮
+  - 开始/停止切换按钮（运行时绿色背景黑色文字，停止时红色背景白色文字）
   - 重置按钮
+  - 时间调整按钮组
   - 显示控制按钮组
+  - 分辨率预设按钮组（含动态分辨率标签和 5 个固定分辨率按钮）
+  - NDI 切换按钮
 
 ## 系统要求
 
 - **Companion**: v2.0 或更高版本
 - **Node.js**: v18 或更高版本
-- **TinyCountdown**: v1.6.6 或更高版本
+- **TinyCountdown**: v1.6.7 或更高版本
 
 ## 安装方法
 
@@ -111,45 +125,64 @@
 7. **全屏模式** - 全屏模式（带下拉选项：切换/开启/关闭）
 8. **显示/隐藏** - 窗口可见性（带下拉选项：切换/显示/隐藏）
 
+#### 输出控制
+
+9. **分辨率** - 设置输出分辨率（Default / 1366x768 / 1920x1080 / 2560x1440 / 3840x2160）
+10. **NDI 输出** - NDI 视频输出（带下拉选项：切换/开启/关闭）
+
 ### Feedbacks（反馈）
 
-1. **开始/停止** - 根据运行状态改变按钮样式（绿色）
-2. **停止状态** - 未运行时改变按钮样式（红色）
+1. **开始/停止** - 倒计时时改变按钮样式（绿色背景 `#3FD63F` + 黑色文字）
+2. **停止状态** - 未运行时改变按钮样式（红色背景 `#FF0000` + 白色文字）
 3. **运行状态** - 根据运行状态改变按钮样式
 4. **暂停状态** - 根据暂停状态改变按钮样式
 5. **闪烁模式** - 闪烁模式启用时改变样式（黄色）
 6. **窗口置顶** - 置顶启用时改变样式
 7. **全屏模式** - 全屏时改变样式
 8. **窗口可见** - 根据窗口可见性改变样式（绿色）
-9. **剩余时间** - 时间低于阈值时改变样式（红色警告，可配置阈值）
+9. **分辨率状态** - 当前分辨率与指定值匹配时改变样式（绿色）
+10. **NDI 输出** - NDI 启用时改变样式（绿色）
+11. **剩余时间** - 时间低于阈值时改变样式（红色警告，可配置阈值）
 
 ### Variables（变量）
 
 可在按钮文本中使用的变量：
 
-- `$(tinycountdown:running)` - 运行状态（true/false）
-- `$(tinycountdown:paused)` - 暂停状态（true/false）
-- `$(tinycountdown:remainingTime)` - 剩余秒数
-- `$(tinycountdown:remainingTimeFormatted)` - 格式化剩余时间（HH:MM:SS）
-- `$(tinycountdown:totalTime)` - 总秒数
-- `$(tinycountdown:time)` - 格式化时间显示（MM:SS）
-- `$(tinycountdown:blink)` - 闪烁状态（true/false）
-- `$(tinycountdown:top)` - 置顶状态（true/false）
-- `$(tinycountdown:fullscreen)` - 全屏状态（true/false）
-- `$(tinycountdown:windowVisible)` - 窗口可见状态（true/false）
-- `$(tinycountdown:port)` - 服务器端口号
+- `$(Tinycountdown:running)` - 运行状态（true/false）
+- `$(Tinycountdown:paused)` - 暂停状态（true/false）
+- `$(Tinycountdown:remainingTime)` - 剩余秒数
+- `$(Tinycountdown:remainingTimeMs)` - 剩余时间毫秒数（用于高精度同步）
+- `$(Tinycountdown:remainingTimeFormatted)` - 格式化剩余时间（HH:MM:SS）
+- `$(Tinycountdown:totalTime)` - 总秒数
+- `$(Tinycountdown:time)` - 格式化时间显示（MM:SS）
+- `$(Tinycountdown:blink)` - 闪烁状态（true/false）
+- `$(Tinycountdown:top)` - 置顶状态（true/false）
+- `$(Tinycountdown:fullscreen)` - 全屏状态（true/false）
+- `$(Tinycountdown:windowVisible)` - 窗口可见状态（true/false）
+- `$(Tinycountdown:port)` - 服务器端口号
+- `$(Tinycountdown:resolution)` - 分辨率索引（-1/0/1/2/3）
+- `$(Tinycountdown:resolutionLabel)` - 分辨率可读标签（如 `1920 x 1080`）
+- `$(Tinycountdown:ndi)` - NDI 输出状态（true/false）
 
 ### Presets（预设）
 
 模块内置了常用预设按钮：
 
-1. **开始/停止切换** - 开始/停止切换按钮（带状态指示）
+1. **开始/停止切换** - 开始/停止切换按钮（运行时绿色背景黑色文字，停止时红色背景白色文字）
 2. **重置** - 重置按钮
 3. **时间调整预设** - 快速增加/减少时间的预设按钮
 4. **闪烁切换** - 闪烁切换按钮（带状态灯）
 5. **置顶切换** - 置顶切换按钮（带状态灯）
 6. **全屏切换** - 全屏切换按钮（带状态灯）
 7. **窗口切换** - 窗口显示切换按钮（带状态灯）
+8. **分辨率预设组**：
+   - **动态标签按钮**：文本为 `$(Tinycountdown:resolutionLabel)`，实时显示当前分辨率
+   - **Default** - 恢复默认分辨率
+   - **1366x768** - 分辨率按钮（12pt 字体）
+   - **1920x1080** - 分辨率按钮（12pt 字体）
+   - **2560x1440** - 分辨率按钮（12pt 字体）
+   - **3840x2160** - 分辨率按钮（12pt 字体）
+9. **NDI 切换** - NDI 输出切换按钮（带状态灯）
 
 ## 技术架构
 
@@ -157,10 +190,13 @@
 
 模块通过 WebSocket 与 TinyCountdown 服务器通信：
 
-- **协议**: `ws://host:port/ws`
+- **协议**: `ws://host:port/ws?token=<token>`
 - **心跳**: 每 10 秒发送 PING，期望收到 PONG
+- **连接超时**: 连接建立超时 5 秒，防止永久挂起
+- **认证**: 通过用户名/密码获取 Token，Token 存储在会话中，连接时作为 URL 参数传递
+- **重连**: 指数退避策略，间隔 [200, 500, 1000, 2000, 5000]ms；Token 有效时快速重连（跳过认证）；Token 失效时自动重新认证（最多 2 次 Token 重试）
 - **消息格式**: 
-  - 命令：纯文本（如 `start`, `stop`, `reset`, `PING`）
+  - 命令：纯文本或带参数的命令（如 `start`, `Resolution_Set?index=1`）
   - 响应：JSON 格式状态数据
 
 ### 支持的命令格式
@@ -190,6 +226,11 @@
 'Show_Enabled'     // 显示窗口
 'Show_Disabled'    // 隐藏窗口
 
+// 输出控制
+'Resolution_Set?index=1'  // 设置分辨率为 1920x1080（-1=Default, 0=1366x768, 1=1920x1080, 2=2560x1440, 3=3840x2160）
+'NDI_Set?enabled=true'   // 开启 NDI 输出
+'NDI_Set?enabled=false'  // 关闭 NDI 输出
+
 // 其他命令
 'PING'           // 心跳
 ```
@@ -203,11 +244,15 @@
     "running": true,
     "paused": false,
     "remainingTime": 300,
+    "remainingTimeMs": 300000,
     "totalTime": 300,
     "blink": false,
     "top": true,
     "fullscreen": false,
     "windowVisible": true,
+    "resolution": 1,
+    "resolutionLabel": "1920 x 1080",
+    "ndi": false,
     "port": 8080
   }
 }
@@ -220,6 +265,8 @@
 - **向下取整**：时间数据使用 Math.floor() 向下取整，避免四舍五入
 - **单一数据流**：所有状态更新来自软件端的主动推送，无需轮询
 - **自动修正**：检测到矛盾数据时自动修正（如运行时自动取消暂停状态）
+- **Token 管理**：密码修改后立即失效所有 Token，关闭所有 WebSocket 连接，模块收到关闭代码 1008 后自动重新认证
+- **密码安全**：密码存储在 Companion 设备密钥库中，模块初始化时从密钥库读取，不依赖配置文件
 
 ## 故障排除
 
@@ -242,6 +289,26 @@
 2. 检查是否启用了 "Reset Variables on Connect"
 3. 查看 Companion 日志中的错误信息
 
+### 分辨率控制无效
+
+1. 确认 TinyCountdown 版本 >= v1.6.7
+2. 检查状态响应中是否包含 `resolution` 字段
+3. 确认分辨率索引对应关系：-1=Default, 0=1366x768, 1=1920x1080, 2=2560x1440, 3=3840x2160
+
+### NDI 控制无效
+
+1. 确认 TinyCountdown 版本 >= v1.6.7
+2. 确认系统已安装 NDI Runtime
+3. 检查状态响应中是否包含 `ndi` 字段
+
+### 重连失败
+
+1. 检查 TinyCountdown 服务器是否正常运行
+2. 确认用户名和密码是否正确
+3. 查看 Companion 日志中是否有 `token/invalid` 或 WebSocket 关闭代码 1008 的错误
+4. 模块会在 Token 失效时自动重新认证，重连间隔为指数退避（200ms/500ms/1000ms/2000ms/5000ms）
+5. 若服务器重启，模块将在 200ms 内发起快速重连
+
 ## 开发指南
 
 ### 本地开发
@@ -255,6 +322,9 @@ npm run format
 
 # 代码检查
 npm run lint
+
+# 打包模块
+npx companion-module-build
 ```
 
 ### 项目结构
@@ -266,6 +336,7 @@ companion-module-tinycountdown/
 │   └── manifest.json    # 模块清单
 ├── src/
 │   ├── main.js          # 主模块代码
+│   ├── presets.js       # 预设按钮定义
 │   └── upgrade.js       # 升级脚本
 ├── package.json         # 项目配置
 ├── .gitignore          # Git 忽略规则
@@ -295,9 +366,9 @@ MIT License
 ---
 
 **作者**: Bob
-**版本**: 1.6.6  
-**最后更新**: 2026 年 3 月 10 日
+**版本**: 1.6.7  
+**最后更新**: 2026 年 6 月 26 日
 
 ---
 
-**TinyCountDown v1.6.6 © 2026 Bob. All Rights Reserved.**
+**TinyCountDown v1.6.7 © 2026 Bob. All Rights Reserved.**

@@ -2,6 +2,65 @@
  * Preset definitions for TinyCountdown module
  */
 
+import { COLORS, RESOLUTION_MAP } from './constants.js'
+
+const SIZES = {
+	default: '24',
+	small: '18',
+	resolution: '12',
+}
+
+const RESOLUTION_PRESET_IDS = {
+	'-1': 'default',
+	'0': '1366',
+	'1': '1920',
+	'2': '2560',
+	'3': '3840',
+}
+
+function createActionPreset({ category, name, text, size, actionId, options, feedbackId, feedbackOptions, activeStyle = {} }) {
+	const preset = {
+		type: 'button',
+		category,
+		name,
+		style: {
+			text,
+			size: size || SIZES.default,
+			color: COLORS.white,
+			bgcolor: COLORS.black,
+		},
+		steps: [
+			{
+				down: actionId ? [{ actionId, options: options || {} }] : [],
+				up: [],
+			},
+		],
+		feedbacks: [],
+	}
+	if (feedbackId) {
+		preset.feedbacks.push({
+			feedbackId,
+			options: feedbackOptions || {},
+			style: {
+				color: activeStyle.color ?? COLORS.black,
+				bgcolor: activeStyle.bgcolor ?? COLORS.green,
+			},
+		})
+	}
+	return preset
+}
+
+function createTimePreset(id, text, minutes, presets) {
+	presets[id] = createActionPreset({
+		category: '常用时间',
+		name: '',
+		text,
+		size: SIZES.default,
+		actionId: 'set_time',
+		options: { hours: 0, minutes, seconds: 0 },
+	})
+}
+
 /**
  * Get all preset definitions
  * @param {any} instance - The module instance
@@ -11,383 +70,158 @@ export function GetPresetsList(instance) {
 	const presets = {}
 
 	// ==================== 常用时间 ====================
-	// 1:00
-	presets['time_1min'] = {
-		type: 'button',
-		category: '常用时间',
-		name: '',
-		style: {
-			text: '1:00',
-			size: '24',
-			color: 16777215,
-			bgcolor: 0,
-		},
-		steps: [
-			{
-				down: [
-					{
-						actionId: 'set_time',
-						options: { hours: 0, minutes: 1, seconds: 0 },
-					},
-				],
-				up: [],
-			},
-		],
-		feedbacks: [],
-	}
-
-	// 3:00
-	presets['time_3min'] = {
-		type: 'button',
-		category: '常用时间',
-		name: '',
-		style: {
-			text: '3:00',
-			size: '24',
-			color: 16777215,
-			bgcolor: 0,
-		},
-		steps: [
-			{
-				down: [
-					{
-						actionId: 'set_time',
-						options: { hours: 0, minutes: 3, seconds: 0 },
-					},
-				],
-				up: [],
-			},
-		],
-		feedbacks: [],
-	}
-
-	// 5:00
-	presets['time_5min'] = {
-		type: 'button',
-		category: '常用时间',
-		name: '',
-		style: {
-			text: '5:00',
-			size: '24',
-			color: 16777215,
-			bgcolor: 0,
-		},
-		steps: [
-			{
-				down: [
-					{
-						actionId: 'set_time',
-						options: { hours: 0, minutes: 5, seconds: 0 },
-					},
-				],
-				up: [],
-			},
-		],
-		feedbacks: [],
-	}
-
-	// 10:00
-	presets['time_10min'] = {
-		type: 'button',
-		category: '常用时间',
-		name: '',
-		style: {
-			text: '10:00',
-			size: '24',
-			color: 16777215,
-			bgcolor: 0,
-		},
-		steps: [
-			{
-				down: [
-					{
-						actionId: 'set_time',
-						options: { hours: 0, minutes: 10, seconds: 0 },
-					},
-				],
-				up: [],
-			},
-		],
-		feedbacks: [],
-	}
+	createTimePreset('time_1min', '1:00', 1, presets)
+	createTimePreset('time_3min', '3:00', 3, presets)
+	createTimePreset('time_5min', '5:00', 5, presets)
+	createTimePreset('time_10min', '10:00', 10, presets)
 
 	// ==================== 功能控制 ====================
 	// 开始
-	presets['start'] = {
-		type: 'button',
+	presets['start'] = createActionPreset({
 		category: '功能控制',
 		name: '',
-		style: {
-			text: '开始',
-			size: '18',
-			color: 16777215,
-			bgcolor: 0,
-		},
-		steps: [
-			{
-				down: [
-					{
-						actionId: 'start_stop_countdown',
-						options: { operation: 'start' },
-					},
-				],
-				up: [],
-			},
-		],
-		feedbacks: [
-			{
-				feedbackId: 'start_stop_countdown',
-				options: {},
-				style: {
-					color: 4183615, // #3FD63F 绿色
-				},
-			},
-		],
-	}
+		text: '开始',
+		size: SIZES.small,
+		actionId: 'start_stop_countdown',
+		options: { operation: 'start' },
+		feedbackId: 'start_stop_countdown',
+		feedbackOptions: {},
+	})
 
 	// 停止
-	presets['stop'] = {
-		type: 'button',
+	presets['stop'] = createActionPreset({
 		category: '功能控制',
 		name: '',
-		style: {
-			text: '停止',
-			size: '18',
-			color: 16777215,
-			bgcolor: 0,
+		text: '停止',
+		size: SIZES.small,
+		actionId: 'start_stop_countdown',
+		options: { operation: 'stop' },
+		feedbackId: 'stop_countdown',
+		feedbackOptions: {},
+		activeStyle: {
+			bgcolor: COLORS.red,
+			color: COLORS.white,
 		},
-		steps: [
-			{
-				down: [
-					{
-						actionId: 'start_stop_countdown',
-						options: { operation: 'stop' },
-					},
-				],
-				up: [],
-			},
-		],
-		feedbacks: [
-			{
-				feedbackId: 'stop_countdown',
-				options: {},
-				style: {
-					color: 16711680, // #FF0000 红色
-				},
-			},
-		],
-	}
+	})
 
 	// 重置
-	presets['reset'] = {
-		type: 'button',
+	presets['reset'] = createActionPreset({
 		category: '功能控制',
 		name: '',
-		style: {
-			text: '重置',
-			size: '18',
-			color: 16777215,
-			bgcolor: 0,
-		},
-		steps: [
-			{
-				down: [
-					{
-						actionId: 'reset_countdown',
-						options: {},
-					},
-				],
-				up: [],
-			},
-		],
-		feedbacks: [],
-	}
+		text: '重置',
+		size: SIZES.small,
+		actionId: 'reset_countdown',
+		options: {},
+	})
 
 	// 全屏
-	presets['fullscreen'] = {
-		type: 'button',
+	presets['fullscreen'] = createActionPreset({
 		category: '功能控制',
 		name: '',
-		style: {
-			text: '全屏',
-			size: '18',
-			color: 16777215,
-			bgcolor: 0,
-		},
-		steps: [
-			{
-				down: [
-					{
-						actionId: 'toggle_fullscreen',
-						options: { operation: 'toggle' },
-					},
-				],
-				up: [],
-			},
-		],
-		feedbacks: [
-			{
-				feedbackId: 'fullscreen_status',
-				options: {},
-				style: {
-					color: 0,
-					bgcolor: 4183615,
-				},
-			},
-		],
-	}
+		text: '全屏',
+		size: SIZES.small,
+		actionId: 'toggle_fullscreen',
+		options: { operation: 'toggle' },
+		feedbackId: 'fullscreen_status',
+		feedbackOptions: {},
+	})
 
 	// 置顶
-	presets['top'] = {
-		type: 'button',
+	presets['top'] = createActionPreset({
 		category: '功能控制',
 		name: '',
-		style: {
-			text: '置顶',
-			size: '18',
-			color: 16777215,
-			bgcolor: 0,
-		},
-		steps: [
-			{
-				down: [
-					{
-						actionId: 'toggle_top',
-						options: { operation: 'toggle' },
-					},
-				],
-				up: [],
-			},
-		],
-		feedbacks: [
-			{
-				feedbackId: 'top_status',
-				options: {},
-				style: {
-					color: 0,
-					bgcolor: 4183615,
-				},
-			},
-		],
-	}
+		text: '置顶',
+		size: SIZES.small,
+		actionId: 'toggle_top',
+		options: { operation: 'toggle' },
+		feedbackId: 'top_status',
+		feedbackOptions: {},
+	})
 
 	// 闪烁
-	presets['blink'] = {
-		type: 'button',
+	presets['blink'] = createActionPreset({
 		category: '功能控制',
 		name: '',
-		style: {
-			text: '闪烁',
-			size: '18',
-			color: 16777215,
-			bgcolor: 0,
-		},
-		steps: [
-			{
-				down: [
-					{
-						actionId: 'toggle_blink',
-						options: { operation: 'toggle' },
-					},
-				],
-				up: [],
-			},
-		],
-		feedbacks: [
-			{
-				feedbackId: 'blink_status',
-				options: {},
-				style: {
-					color: 0,
-					bgcolor: 4183615,
-				},
-			},
-		],
-	}
+		text: '闪烁',
+		size: SIZES.small,
+		actionId: 'toggle_blink',
+		options: { operation: 'toggle' },
+		feedbackId: 'blink_status',
+		feedbackOptions: {},
+	})
 
 	// 窗口（合并显示/隐藏）
-	presets['window'] = {
-		type: 'button',
+	presets['window'] = createActionPreset({
 		category: '功能控制',
 		name: '',
-		style: {
-			text: '窗口',
-			size: '18',
-			color: 16777215,
-			bgcolor: 0,
-		},
-		steps: [
-			{
-				down: [
-					{
-						actionId: 'toggle_window',
-						options: { operation: 'toggle' },
-					},
-				],
-				up: [],
-			},
-		],
-		feedbacks: [
-			{
-				feedbackId: 'window_visible',
-				options: {},
-				style: {
-					color: 0,
-					bgcolor: 4183615,
-				},
-			},
-		],
-	}
+		text: '窗口',
+		size: SIZES.small,
+		actionId: 'toggle_window',
+		options: { operation: 'toggle' },
+		feedbackId: 'window_visible',
+		feedbackOptions: {},
+	})
 
 	// 时间 +
-	presets['time_add'] = {
-		type: 'button',
+	presets['time_add'] = createActionPreset({
 		category: '功能控制',
 		name: '',
+		text: '时间+',
+		size: SIZES.small,
+		actionId: 'adjust_time',
+		options: { operation: 'add', hours: 0, minutes: 1, seconds: 0 },
+	})
+
+	// 时间 -
+	presets['time_sub'] = createActionPreset({
+		category: '功能控制',
+		name: '',
+		text: '时间-',
+		size: SIZES.small,
+		actionId: 'adjust_time',
+		options: { operation: 'subtract', hours: 0, minutes: 1, seconds: 0 },
+	})
+
+	// 分辨率当前标签（动态显示当前分辨率名称）
+	presets['resolution_label'] = {
+		type: 'button',
+		category: '分辨率',
+		name: '',
 		style: {
-			text: '时间+',
-			size: '18',
-			color: 16777215,
-			bgcolor: 0,
+			text: '$(Tinycountdown:resolutionLabel)',
+			size: SIZES.resolution,
+			color: COLORS.white,
+			bgcolor: COLORS.black,
 		},
-		steps: [
-			{
-				down: [
-					{
-						actionId: 'adjust_time',
-						options: { operation: 'add', hours: 0, minutes: 1, seconds: 0 },
-					},
-				],
-				up: [],
-			},
-		],
+		steps: [],
 		feedbacks: [],
 	}
 
-	// 时间 -
-	presets['time_sub'] = {
-		type: 'button',
-		category: '功能控制',
-		name: '',
-		style: {
-			text: '时间-',
-			size: '18',
-			color: 16777215,
-			bgcolor: 0,
-		},
-		steps: [
-			{
-				down: [
-					{
-						actionId: 'adjust_time',
-						options: { operation: 'subtract', hours: 0, minutes: 1, seconds: 0 },
-					},
-				],
-				up: [],
-			},
-		],
-		feedbacks: [],
+	// 分辨率按钮循环生成
+	for (const [resolutionId, label] of Object.entries(RESOLUTION_MAP)) {
+		presets[`resolution_${RESOLUTION_PRESET_IDS[resolutionId]}`] = createActionPreset({
+			category: '分辨率',
+			name: '',
+			text: label.replace(/\s/g, ''),
+			size: SIZES.resolution,
+			actionId: 'set_resolution',
+			options: { resolution: resolutionId },
+			feedbackId: 'resolution_status',
+			feedbackOptions: { resolution: resolutionId },
+		})
 	}
+
+	// NDI 切换
+	presets['ndi_toggle'] = createActionPreset({
+		category: 'NDI',
+		name: '',
+		text: 'NDI',
+		size: SIZES.small,
+		actionId: 'toggle_ndi',
+		options: { operation: 'toggle' },
+		feedbackId: 'ndi_status',
+		feedbackOptions: {},
+	})
 
 	// ==================== 状态显示 ====================
 	// 46:13 (分：秒格式)
@@ -396,9 +230,9 @@ export function GetPresetsList(instance) {
 		category: '状态显示',
 		name: '',
 		style: {
-			text: '$(TinyCountdown:time)',
-			color: 16777215,
-			bgcolor: 0,
+			text: '$(Tinycountdown:time)',
+			color: COLORS.white,
+			bgcolor: COLORS.black,
 		},
 		steps: [],
 		feedbacks: [],
@@ -410,10 +244,10 @@ export function GetPresetsList(instance) {
 		category: '状态显示',
 		name: '',
 		style: {
-			text: '$(TinyCountdown:remainingTimeFormatted)',
+			text: '$(Tinycountdown:remainingTimeFormatted)',
 			size: '15',
-			color: 16777215,
-			bgcolor: 0,
+			color: COLORS.white,
+			bgcolor: COLORS.black,
 		},
 		steps: [],
 		feedbacks: [],
@@ -425,10 +259,10 @@ export function GetPresetsList(instance) {
 		category: '状态显示',
 		name: '',
 		style: {
-			text: '$(TinyCountdown:port)',
+			text: '$(Tinycountdown:port)',
 			size: 'auto',
-			color: 16777215,
-			bgcolor: 0,
+			color: COLORS.white,
+			bgcolor: COLORS.black,
 		},
 		steps: [],
 		feedbacks: [],

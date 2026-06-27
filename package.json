@@ -1,15 +1,15 @@
 {
 	"name": "companion-module-TinyCountDown",
 	"displayName": "TinyCountDown",    
-	"version": "1.6.6",
+	"version": "1.6.7",
 	"description": "Bitfocus Companion module for TinyCountdown application",
 	"main": "src/main.js",
 	"type": "module",
 	"scripts": {
-		"test": "echo \"Error: no test specified\" && exit 1",
-		"format": "prettier -w .",
-		"lint": "eslint --ext .js src/"
-	},
+    "test": "node src/reconnection.test.js",
+    "format": "prettier -w .",
+    "lint": "eslint --ext .js src/"
+  },
 	"keywords": [
 		"companion",
 		"bitfocus",

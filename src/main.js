@@ -2,13 +2,76 @@ import { InstanceBase, runEntrypoint, InstanceStatus } from '@companion-module/b
 import WebSocket from 'ws'
 import { upgradeScripts } from './upgrade.js'
 import { LoadPresets } from './presets.js'
+import { validateCredentials, buildWebSocketUrl } from './auth-utils.js'
+import { COLORS, RESOLUTION_MAP, RESOLUTION_CHOICES } from './constants.js'
+import {
+	WS_CONNECTION_TIMEOUT,
+	LOGIN_TIMEOUT,
+	MAX_TOKEN_RECONNECT_ATTEMPTS,
+	computeReconnectDelay,
+	isNetworkError,
+	isTokenInvalidated,
+	createAbortableTimeout,
+} from './reconnection.js'
+
+function formatTimeHHMMSS(totalSeconds) {
+	const hours = Math.floor(totalSeconds / 3600)
+	const minutes = Math.floor((totalSeconds % 3600) / 60)
+	const seconds = totalSeconds % 60
+	return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
+}
+
+function formatTimeMMSS(totalSeconds) {
+	const totalMinutes = Math.floor(totalSeconds / 60)
+	const seconds = totalSeconds % 60
+	return `${totalMinutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
+}
+
+function createToggleAction(name, commands, sendCommand, log, logTexts) {
+	return {
+		name,
+		options: [
+			{
+				type: 'dropdown',
+				label: '操作',
+				id: 'operation',
+				default: 'toggle',
+				choices: [
+					{ id: 'toggle', label: '切换' },
+					{ id: 'enable', label: '开启' },
+					{ id: 'disable', label: '关闭' },
+				],
+			},
+		],
+		callback: async (action) => {
+			const op = action.options.operation
+			let command
+			let logText
+			if (op === 'toggle') {
+				command = commands.toggle
+				logText = logTexts?.toggle || '切换'
+			} else if (op === 'enable') {
+				command = commands.enable
+				logText = logTexts?.enable || '开启'
+			} else {
+				command = commands.disable
+				logText = logTexts?.disable || '关闭'
+			}
+			await sendCommand(command)
+			log('info', `操作：${logText}${name}`)
+		},
+	}
+}
 
 class TinyCountdownInstance extends InstanceBase {
 	isInitialized = false
 	ws = null
 	heartbeatInterval = null
-	reconnectInterval = null
-	reconnectCount = 0
+	connectionTimeout = null
+	reconnectTimeout = null
+	reconnectAttempt = 0
+	closingIntentionally = false
+	isConnecting = false
 	
 	// Configuration defaults
 	config = {
@@ -16,25 +79,42 @@ class TinyCountdownInstance extends InstanceBase {
 		port: 0, // 0 means auto-detect from status
 		reconnect: true,
 		debug_messages: false,
-		reset_variables: true
+		reset_variables: true,
+		auth_username: 'admin',
 	}
+
+	// Secrets store (password is kept here, not in config)
+	secrets = {}
 
 	// Connection state
 	connectionState = {
 		running: false,
 		paused: false,
 		remainingTime: 0,
+		remainingTimeMs: 0,
 		totalTime: 0,
 		time: '00:00',
 		blink: false,
 		top: false,
 		fullscreen: false,
 		windowVisible: true,
-		port: 0
+		port: 0,
+		resolution: -1,
+		ndi: false,
+		lastSyncTime: 0,
 	}
 
-	init(config) {
+	// Local interpolation timer for smooth countdown display
+	interpolationInterval = null
+
+	// Authentication state
+	isAuthenticated = false
+	isAuthenticating = false
+	authToken = null
+
+	init(config, isFirstInit, secrets) {
 		this.config = config || this.config
+		this.secrets = secrets || {}
 		this.isInitialized = true
 		
 		// Initialize variables, actions and feedbacks
@@ -45,42 +125,69 @@ class TinyCountdownInstance extends InstanceBase {
 		// Load presets
 		LoadPresets(this)
 		
-		// Setup WebSocket connection
-		this.setupWebSocket()
+		// Authenticate before establishing WebSocket connection
+		this.authenticate()
 	}
 
 	async destroy() {
 		this.isInitialized = false
 		
 		// Cleanup timers
-		if (this.heartbeatInterval) {
-			clearInterval(this.heartbeatInterval)
-			this.heartbeatInterval = null
-		}
-		if (this.reconnectInterval) {
-			clearTimeout(this.reconnectInterval)
-			this.reconnectInterval = null
-		}
+		this.stopHeartbeat()
+		this.stopConnectionTimeout()
+		this.stopReconnect()
+		this.stopInterpolation()
 		
 		// Close WebSocket
-		if (this.ws) {
-			this.ws.close(1000)
-			this.ws = null
-		}
+		this.closeWebSocketIntentionally()
 	}
 
-	async configUpdated(config) {
+	async configUpdated(config, secrets) {
 		this.config = config
+		this.secrets = secrets || {}
 		
-		// Reconnect if host or port changed
-		if (this.ws) {
-			this.ws.close(1000)
-			this.ws = null
-		}
+		this.stopHeartbeat()
+		this.stopConnectionTimeout()
+		this.stopReconnect()
+		
+		// Close existing WebSocket connection and ignore its close event
+		this.closeWebSocketIntentionally()
+		
+		// Reset authentication state and re-authenticate
+		this.clearAuthState()
+		this.reconnectAttempt = 0
 		
 		setTimeout(() => {
-			this.setupWebSocket()
-		}, 1000)
+			this.authenticate()
+		}, 100)
+	}
+
+	closeWebSocketIntentionally() {
+		if (!this.ws) {
+			return
+		}
+
+		const socket = this.ws
+		this.ws = null
+
+		// Only set the flag and call close() when the socket is still active.
+		// If the socket is already closed/closed, we just clean up the reference.
+		const isActive = socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING
+
+		socket.removeAllListeners('open')
+		socket.removeAllListeners('message')
+		socket.removeAllListeners('close')
+		socket.removeAllListeners('error')
+
+		if (isActive) {
+			this.closingIntentionally = true
+			socket.close(1000)
+			// Clear the flag after the current event loop so legitimate close events
+			// that may already be queued are ignored.
+			setTimeout(() => {
+				this.closingIntentionally = false
+			}, 0)
+		}
 	}
 
 	getConfigFields() {
@@ -135,6 +242,25 @@ class TinyCountdownInstance extends InstanceBase {
 				width: 6,
 				default: true,
 			},
+			{
+				type: 'textinput',
+				id: 'auth_username',
+				label: '用户名',
+				tooltip: '管理员用户名，固定为 admin',
+				width: 6,
+				default: 'admin',
+				regex: '/^.{1,64}$/',
+			},
+			{
+				type: 'textinput',
+				id: 'auth_password',
+				label: '密码',
+				tooltip: '管理员密码，与后台管理页面密码一致（必填，不能为空或仅包含空格）',
+				width: 6,
+				default: '',
+				required: true,
+				regex: '/^.{1,64}$/',
+			},
 		]
 	}
 
@@ -143,6 +269,7 @@ class TinyCountdownInstance extends InstanceBase {
 			{ variableId: 'running', name: '运行状态' },
 			{ variableId: 'paused', name: '暂停状态' },
 			{ variableId: 'remainingTime', name: '剩余时间 (秒)' },
+			{ variableId: 'remainingTimeMs', name: '剩余时间 (毫秒)' },
 			{ variableId: 'remainingTimeFormatted', name: '剩余时间 (时：分：秒)' },
 			{ variableId: 'totalTime', name: '总时间 (秒)' },
 			{ variableId: 'time', name: '时间 (分：秒)' },
@@ -151,6 +278,10 @@ class TinyCountdownInstance extends InstanceBase {
 			{ variableId: 'fullscreen', name: '全屏模式' },
 			{ variableId: 'windowVisible', name: '窗口可见' },
 			{ variableId: 'port', name: '服务器端口' },
+			{ variableId: 'resolution', name: '分辨率索引' },
+			{ variableId: 'resolutionLabel', name: '分辨率' },
+			{ variableId: 'ndi', name: 'NDI 输出' },
+			{ variableId: 'authenticated', name: '已登录' },
 		]
 		
 		this.setVariableDefinitions(variableDefinitions)
@@ -161,6 +292,7 @@ class TinyCountdownInstance extends InstanceBase {
 				running: 'false',
 				paused: 'false',
 				remainingTime: '0',
+				remainingTimeMs: '0',
 				remainingTimeFormatted: '00:00:00',
 				totalTime: '0',
 				time: '00:00',
@@ -169,11 +301,17 @@ class TinyCountdownInstance extends InstanceBase {
 				fullscreen: 'false',
 				windowVisible: 'true',
 				port: '0',
+				resolution: '-1',
+				resolutionLabel: 'Default',
+				ndi: 'false',
+				authenticated: 'false',
 			})
 		}
 	}
 
 	initActions() {
+		const sendCommand = this.sendCommand.bind(this)
+
 		this.setActionDefinitions({
 			start_stop_countdown: {
 				name: '开始/停止',
@@ -211,7 +349,7 @@ class TinyCountdownInstance extends InstanceBase {
 							logText = '停止倒计时'
 							break
 					}
-					await this.sendCommand(command)
+					await sendCommand(command)
 					this.log('info', `操作：${logText}`)
 				},
 			},
@@ -221,7 +359,7 @@ class TinyCountdownInstance extends InstanceBase {
 				callback: async () => {
 					const command = 'reset'
 					this.log('debug', `发送重置命令："${command}"`)
-					await this.sendCommand(command)
+					await sendCommand(command)
 					this.log('info', '操作：重置倒计时')
 				},
 			},
@@ -256,7 +394,7 @@ class TinyCountdownInstance extends InstanceBase {
 					const totalSeconds = action.options.hours * 3600 + 
 									   action.options.minutes * 60 + 
 									   action.options.seconds
-					await this.sendCommand(`time=${totalSeconds}`)
+					await sendCommand(`time=${totalSeconds}`)
 					this.log('info', `操作：设置时间为 ${totalSeconds}秒`)
 				},
 			},
@@ -304,14 +442,67 @@ class TinyCountdownInstance extends InstanceBase {
 					const command = action.options.operation === 'add' 
 						? `timeAdd=${totalSeconds}`
 						: `timeSubtract=${totalSeconds}`
-					await this.sendCommand(command)
-									
+					await sendCommand(command)
+								
 					const opText = action.options.operation === 'add' ? '增加' : '减少'
 					this.log('info', `操作：${opText} ${totalSeconds}秒`)
 				},
 			},
-			toggle_blink: {
-				name: '闪烁模式',
+			toggle_blink: createToggleAction(
+				'闪烁模式',
+				{ toggle: 'Blink_Toggle', enable: 'Blink_Enabled', disable: 'Blink_Disabled' },
+				sendCommand,
+				this.log.bind(this),
+				{ toggle: '切换闪烁模式', enable: '开启闪烁模式', disable: '关闭闪烁模式' },
+			),
+			toggle_top: createToggleAction(
+				'置顶',
+				{ toggle: 'Top_Toggle', enable: 'Top_Enabled', disable: 'Top_Disabled' },
+				sendCommand,
+				this.log.bind(this),
+				{ toggle: '切换置顶', enable: '开启置顶', disable: '关闭置顶' },
+			),
+			toggle_fullscreen: createToggleAction(
+				'全屏模式',
+				{ toggle: 'Fullscreen_Toggle', enable: 'Fullscreen_Enabled', disable: 'Fullscreen_Disabled' },
+				sendCommand,
+				this.log.bind(this),
+				{ toggle: '切换全屏模式', enable: '开启全屏模式', disable: '关闭全屏模式' },
+			),
+			toggle_window: createToggleAction(
+				'显示/隐藏',
+				{ toggle: 'Show_Toggle', enable: 'Show_Enabled', disable: 'Show_Disabled' },
+				sendCommand,
+				this.log.bind(this),
+				{ toggle: '切换窗口可见性', enable: '显示窗口', disable: '隐藏窗口' },
+			),
+			set_resolution: {
+				name: '分辨率',
+				options: [
+					{
+						type: 'dropdown',
+						label: '分辨率',
+						id: 'resolution',
+						default: '-1',
+						choices: RESOLUTION_CHOICES,
+					},
+				],
+				callback: async (action) => {
+					const index = action.options.resolution
+					await sendCommand(`Resolution_Set?index=${index}`)
+					this.log('info', `操作：设置分辨率为 ${index}`)
+				},
+			},
+			authenticate: {
+				name: '登录/重新认证',
+				options: [],
+				callback: async () => {
+					this.log('info', '操作：手动触发登录认证')
+					await this.authenticate()
+				},
+			},
+			toggle_ndi: {
+				name: 'NDI 输出',
 				options: [
 					{
 						type: 'dropdown',
@@ -327,105 +518,23 @@ class TinyCountdownInstance extends InstanceBase {
 				],
 				callback: async (action) => {
 					const op = action.options.operation
+					let command
+					let logText
 					if (op === 'toggle') {
-						await this.sendCommand('Blink_Toggle')
-						this.log('info', '操作：切换闪烁')
+						const target = !this.connectionState.ndi
+						command = `NDI_Set?enabled=${target}`
+						logText = target ? '开启 NDI 输出' : '关闭 NDI 输出'
 					} else if (op === 'enable') {
-						await this.sendCommand('Blink_Enabled')
-						this.log('info', '操作：开启闪烁')
+						command = 'NDI_Set?enabled=true'
+						logText = '开启 NDI 输出'
 					} else {
-						await this.sendCommand('Blink_Disabled')
-						this.log('info', '操作：关闭闪烁')
+						command = 'NDI_Set?enabled=false'
+						logText = '关闭 NDI 输出'
 					}
+					await sendCommand(command)
+					this.log('info', `操作：${logText}`)
 				},
 			},
-			toggle_top: {
-				name: '置顶',
-				options: [
-					{
-						type: 'dropdown',
-						label: '操作',
-						id: 'operation',
-						default: 'toggle',
-						choices: [
-							{ id: 'toggle', label: '切换' },
-							{ id: 'enable', label: '开启' },
-							{ id: 'disable', label: '关闭' },
-						],
-					},
-				],
-				callback: async (action) => {
-					const op = action.options.operation
-					if (op === 'toggle') {
-						await this.sendCommand('Top_Toggle')
-						this.log('info', '操作：切换窗口置顶')
-					} else if (op === 'enable') {
-						await this.sendCommand('Top_Enabled')
-						this.log('info', '操作：开启窗口置顶')
-					} else {
-						await this.sendCommand('Top_Disabled')
-						this.log('info', '操作：关闭窗口置顶')
-					}
-				},
-			},
-			toggle_fullscreen: {
-				name: '全屏模式',
-				options: [
-					{
-						type: 'dropdown',
-						label: '操作',
-						id: 'operation',
-						default: 'toggle',
-						choices: [
-							{ id: 'toggle', label: '切换' },
-							{ id: 'enable', label: '开启' },
-							{ id: 'disable', label: '关闭' },
-						],
-					},
-				],
-				callback: async (action) => {
-					const op = action.options.operation
-					if (op === 'toggle') {
-						await this.sendCommand('Fullscreen_Toggle')
-						this.log('info', '操作：切换全屏')
-					} else if (op === 'enable') {
-						await this.sendCommand('Fullscreen_Enabled')
-						this.log('info', '操作：开启全屏')
-					} else {
-						await this.sendCommand('Fullscreen_Disabled')
-						this.log('info', '操作：关闭全屏')
-					}
-				},
-			},
-			toggle_window: {
-				name: '显示/隐藏',
-				options: [
-					{
-						type: 'dropdown',
-						label: '操作',
-						id: 'operation',
-						default: 'toggle',
-						choices: [
-							{ id: 'toggle', label: '切换' },
-							{ id: 'enable', label: '显示' },
-							{ id: 'disable', label: '隐藏' },
-						],
-					},
-				],
-				callback: async (action) => {
-					const op = action.options.operation
-					if (op === 'toggle') {
-						await this.sendCommand('Show_Toggle')
-						this.log('info', '操作：切换窗口可见性')
-					} else if (op === 'enable') {
-						await this.sendCommand('Show_Enabled')
-						this.log('info', '操作：显示窗口')
-					} else {
-						await this.sendCommand('Show_Disabled')
-						this.log('info', '操作：隐藏窗口')
-					}
-				}
-			}
 		})
 	}
 
@@ -435,7 +544,7 @@ class TinyCountdownInstance extends InstanceBase {
 				name: '开始/停止',
 				type: 'boolean',
 				defaultStyle: {
-					color: '#3FD63F',
+					color: COLORS.green,
 				},
 				options: [],
 				callback: () => {
@@ -446,7 +555,7 @@ class TinyCountdownInstance extends InstanceBase {
 				name: '停止状态',
 				type: 'boolean',
 				defaultStyle: {
-					color: '#FF0000',
+					color: COLORS.red,
 				},
 				options: [],
 				callback: () => {
@@ -457,8 +566,8 @@ class TinyCountdownInstance extends InstanceBase {
 				name: '运行状态',
 				type: 'boolean',
 				defaultStyle: {
-					bgcolor: '#3FD63F',
-					color: '#000000',
+					bgcolor: COLORS.green,
+					color: COLORS.black,
 				},
 				options: [
 					{
@@ -481,8 +590,8 @@ class TinyCountdownInstance extends InstanceBase {
 				name: '暂停状态',
 				type: 'boolean',
 				defaultStyle: {
-					bgcolor: '#FFA500',
-					color: '#000000',
+					bgcolor: 0xFFA500,
+					color: COLORS.black,
 				},
 				options: [
 					{
@@ -505,8 +614,8 @@ class TinyCountdownInstance extends InstanceBase {
 				name: '闪烁模式',
 				type: 'boolean',
 				defaultStyle: {
-					bgcolor: '#FFFF00',
-					color: '#000000',
+					bgcolor: COLORS.yellow,
+					color: COLORS.black,
 				},
 				options: [],
 				callback: () => {
@@ -517,8 +626,8 @@ class TinyCountdownInstance extends InstanceBase {
 				name: '窗口置顶',
 				type: 'boolean',
 				defaultStyle: {
-					bgcolor: '#00BFFF',
-					color: '#000000',
+					bgcolor: 0x00BFFF,
+					color: COLORS.black,
 				},
 				options: [],
 				callback: () => {
@@ -529,8 +638,8 @@ class TinyCountdownInstance extends InstanceBase {
 				name: '全屏模式',
 				type: 'boolean',
 				defaultStyle: {
-					bgcolor: '#9370DB',
-					color: '#000000',
+					bgcolor: 0x9370DB,
+					color: COLORS.black,
 				},
 				options: [],
 				callback: () => {
@@ -541,21 +650,52 @@ class TinyCountdownInstance extends InstanceBase {
 				name: '窗口可见',
 				type: 'boolean',
 				defaultStyle: {
-					bgcolor: '#32CD32',
-					color: '#000000',
+					bgcolor: 0x32CD32,
+					color: COLORS.black,
 				},
 				options: [],
 				callback: () => {
-					// 窗口可见时返回 true
 					return this.connectionState.windowVisible
+				},
+			},
+			ndi_status: {
+				name: 'NDI 输出',
+				type: 'boolean',
+				defaultStyle: {
+					bgcolor: COLORS.green,
+					color: COLORS.black,
+				},
+				options: [],
+				callback: () => {
+					return this.connectionState.ndi
+				},
+			},
+			resolution_status: {
+				name: '分辨率状态',
+				type: 'boolean',
+				defaultStyle: {
+					bgcolor: COLORS.green,
+					color: COLORS.black,
+				},
+				options: [
+					{
+						type: 'dropdown',
+						label: '分辨率',
+						id: 'resolution',
+						default: '-1',
+						choices: RESOLUTION_CHOICES,
+					},
+				],
+				callback: (feedback) => {
+					return String(this.connectionState.resolution) === feedback.options.resolution
 				},
 			},
 			time_remaining: {
 				name: '剩余时间',
 				type: 'boolean',
 				defaultStyle: {
-					bgcolor: '#FF0000',
-					color: '#FFFFFF',
+					bgcolor: COLORS.red,
+					color: COLORS.white,
 				},
 				options: [
 					{
@@ -577,40 +717,168 @@ class TinyCountdownInstance extends InstanceBase {
 						   this.connectionState.remainingTime > 0
 				}
 			},
+			authenticated_status: {
+				name: '登录状态',
+				type: 'boolean',
+				defaultStyle: {
+					bgcolor: COLORS.green,
+					color: COLORS.black,
+				},
+				options: [
+					{
+						type: 'dropdown',
+						label: '登录状态时',
+						id: 'state_authenticated',
+						default: 'true',
+						choices: [
+							{ id: 'true', label: '已登录' },
+							{ id: 'false', label: '未登录' },
+						],
+					},
+				],
+				callback: (feedback) => {
+					const expectedState = feedback.options.state_authenticated === 'true'
+					return this.isAuthenticated === expectedState
+				},
+			},
 		})
 	}
 
-	setupWebSocket() {
-		const protocol = 'ws:'
-		const host = this.config.host || 'localhost'
-		const port = this.config.port || 0
-		
-		// Build WebSocket URL
-		let wsUrl = `${protocol}//${host}`
-		if (port > 0) {
-			wsUrl += `:${port}`
+	/**
+	 * 用户登录认证
+	 * 调用 TinyCountdown 后台相同的 /api/login 接口，验证成功后才会建立 WebSocket 连接。
+	 */
+	async authenticate() {
+		if (this.isAuthenticating) {
+			return
 		}
-		wsUrl += '/ws'
-		
+		this.isAuthenticating = true
+
+		try {
+			// 表单验证：用户名/密码必填，且密码不能仅由空白字符组成
+			const username = (this.config.auth_username || '').trim()
+			const secretPassword = this.secrets && this.secrets.auth_password
+			const configPassword = this.config.auth_password
+			const rawPassword = secretPassword || configPassword || ''
+			const passwordSource = secretPassword ? 'secrets' : (configPassword ? 'config' : 'none')
+			this.log('debug', `读取到密码来源：${passwordSource}，长度：${rawPassword.length}`)
+
+			const validation = validateCredentials(username, rawPassword)
+			if (!validation.valid) {
+				this.updateStatus(InstanceStatus.BadConfig, validation.message)
+				throw new Error(validation.message)
+			}
+
+			const host = this.config.host
+			const port = this.config.port || 80
+			const loginUrl = `http://${host}:${port}/api/login`
+
+			this.log('debug', `正在登录：${username}`)
+			this.updateStatus(InstanceStatus.Connecting)
+
+			const { signal, clear: clearLoginTimeout } = createAbortableTimeout(LOGIN_TIMEOUT, () => {
+				this.log('warn', `登录请求在 ${LOGIN_TIMEOUT}ms 内未完成，强制取消`)
+			})
+
+			let response
+			try {
+				response = await fetch(loginUrl, {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/x-www-form-urlencoded',
+						'User-Agent': 'TinyCountdown-Companion/1.6.7',
+					},
+					body: `username=${encodeURIComponent(username)}&password=${encodeURIComponent(rawPassword)}`,
+					signal,
+				})
+			} finally {
+				clearLoginTimeout()
+			}
+
+			let result = null
+			const responseText = await response.text()
+			try {
+				result = JSON.parse(responseText)
+			} catch {
+				// 非 JSON 响应时保留 null
+			}
+
+			if (response.ok && result && result.type === 'response' && result.code === 200) {
+				this.isAuthenticated = true
+				this.authToken = result.token || null
+				this.setVariableValues({ authenticated: 'true' })
+				this.checkFeedbacks()
+				this.log('info', '登录成功')
+				this.stopReconnect()
+				this.setupWebSocket()
+			} else if (response.status === 401) {
+				throw new Error('用户名或密码错误')
+			} else {
+				const message = result?.message || `HTTP ${response.status}`
+				throw new Error(`登录失败：${message}`)
+			}
+		} catch (error) {
+			this.clearAuthState()
+			this.log('error', `登录失败：${error.message}`)
+
+			// Network-level failures (server restarting, unreachable, etc.) should be
+			// retried so recovery is automatic. Authentication failures keep BadConfig.
+			if (isNetworkError(error)) {
+				this.updateStatus(InstanceStatus.ConnectionFailure, error.message)
+				this.scheduleReconnect(1000, '登录网络错误')
+			} else {
+				this.updateStatus(InstanceStatus.BadConfig, error.message)
+			}
+		} finally {
+			this.isAuthenticating = false
+		}
+	}
+
+	setupWebSocket() {
+		// 未登录时重新启动认证链路，而不是静默放弃，避免断线后彻底停止恢复。
+		if (!this.isAuthenticated) {
+			this.log('warn', '未登录，先执行认证再建立 WebSocket 连接')
+			this.authenticate()
+			return
+		}
+
+		// 避免同时存在多个连接尝试
+		if (this.isConnecting) {
+			this.log('debug', '已有 WebSocket 连接正在进行中，跳过重复尝试')
+			return
+		}
+		this.isConnecting = true
+		this.stopReconnect()
+		this.closeWebSocketIntentionally()
+
+		const wsUrl = buildWebSocketUrl('ws:', this.config.host, this.config.port, this.authToken)
+
 		this.log('debug', `正在连接到 WebSocket: ${wsUrl}`)
 		this.updateStatus(InstanceStatus.Connecting)
+
+		// 连接超时保护：防止 ws 永远卡在 CONNECTING 状态
+		const timeout = createAbortableTimeout(WS_CONNECTION_TIMEOUT, () => {
+			if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
+				this.log('warn', `WebSocket 连接在 ${WS_CONNECTION_TIMEOUT}ms 内未建立，强制终止并重试`)
+				this.ws.terminate()
+			}
+		})
+		this.connectionTimeout = timeout.timer
 		
 		try {
 			// 创建 WebSocket 连接时添加选项，设置 User-Agent
 			const wsOptions = {
 				headers: {
-					'User-Agent': 'TinyCountdown-Companion/1.6.6'
+					'User-Agent': 'TinyCountdown-Companion/1.6.7'
 				}
 			}
 			this.ws = new WebSocket(wsUrl, undefined, wsOptions)
 			
 			this.ws.on('open', () => {
+				this.finishConnectionAttempt()
+				this.reconnectAttempt = 0
 				this.updateStatus(InstanceStatus.Ok)
-				this.reconnectCount = 0
-						
-				// Start heartbeat
 				this.startHeartbeat()
-						
 				// WebSocket 连接成功后，服务端已主动推送状态，无需再发送 GET_STATUS 请求
 				// 避免冗余通讯（2026-03-10 优化）
 			})
@@ -619,20 +887,27 @@ class TinyCountdownInstance extends InstanceBase {
 				this.handleMessage(data)
 			})
 			
-			this.ws.on('close', (code) => {
-				this.log('warn', `WebSocket 连接已关闭，代码 ${code}`)
+			this.ws.on('close', (code, reason) => {
+				this.finishConnectionAttempt()
+				const reasonText = reason ? reason.toString() : ''
+				this.log('warn', `WebSocket 连接已关闭，代码 ${code}${reasonText ? `，原因：${reasonText}` : ''}`)
 				this.updateStatus(InstanceStatus.Disconnected, `已关闭：${code}`)
-				this.maybeReconnect()
+				// Stop local interpolation to avoid counting down while disconnected
+				this.stopInterpolation()
+				this.stopHeartbeat()
+				this.scheduleReconnectFromClose(code, reasonText)
 			})
 			
 			this.ws.on('error', (error) => {
+				this.finishConnectionAttempt()
 				this.log('error', `WebSocket 错误：${error.message}`)
 				this.updateStatus(InstanceStatus.ConnectionFailure, error.message)
 			})
 		} catch (error) {
+			this.finishConnectionAttempt()
 			this.log('error', `无法创建 WebSocket 连接：${error.message}`)
 			this.updateStatus(InstanceStatus.ConnectionFailure, error.message)
-			this.maybeReconnect()
+			this.scheduleReconnect()
 		}
 	}
 
@@ -641,8 +916,6 @@ class TinyCountdownInstance extends InstanceBase {
 			let message
 			if (Buffer.isBuffer(data)) {
 				message = data.toString('utf8')
-			} else if (typeof data === 'object') {
-				message = JSON.stringify(data)
 			} else {
 				message = data.toString()
 			}
@@ -683,6 +956,12 @@ class TinyCountdownInstance extends InstanceBase {
 		if (parsedData.type === 'pong') {
 			return
 		}
+
+		// 处理服务端下发的登出/端口变更通知
+		if (parsedData.type === 'logout') {
+			this.handleLogoutMessage(parsedData)
+			return
+		}
 		
 		// 统一数据标准化：提取状态数据
 		const normalizedData = this.normalizeStatusData(parsedData)
@@ -702,6 +981,25 @@ class TinyCountdownInstance extends InstanceBase {
 			}
 		} else {
 			this.log('warn', `未知消息格式：${JSON.stringify(parsedData)}`)
+		}
+	}
+
+	handleLogoutMessage(parsedData) {
+		const reason = parsedData.reason || ''
+
+		if (reason === 'port_changed') {
+			const oldPort = parsedData.old_port
+			const newPort = parsedData.new_port
+			this.log(
+				'warn',
+				`TinyCountdown 端口已变更：${oldPort} -> ${newPort}，请在模块配置中更新端口并保存`,
+			)
+			this.updateStatus(
+				InstanceStatus.BadConfig,
+				`端口已变更为 ${newPort}，请更新配置`,
+			)
+		} else {
+			this.log('warn', `收到服务端登出通知：${reason}`)
 		}
 	}
 
@@ -739,12 +1037,15 @@ class TinyCountdownInstance extends InstanceBase {
 			running: rawData.running ?? false,
 			paused: rawData.paused ?? false,
 			remainingTime: rawData.remainingTime ?? 0,
+			remainingTimeMs: rawData.remainingTimeMs ?? ((rawData.remainingTime ?? 0) * 1000),
 			totalTime: rawData.totalTime ?? 0,
 			blink: rawData.blink ?? false,
 			top: rawData.top ?? false,
 			fullscreen: rawData.fullscreen ?? false,
 			windowVisible: rawData.windowVisible ?? true,
-			port: rawData.port ?? 0
+			port: rawData.port ?? 0,
+			resolution: rawData.resolution ?? -1,
+			ndi: rawData.ndi ?? false,
 		}
 	}
 	
@@ -755,20 +1056,45 @@ class TinyCountdownInstance extends InstanceBase {
 	 */
 	validateStatusData(data) {
 		// 基本类型验证
-		if (typeof data.running !== 'boolean') {
-			this.log('warn', `running 类型错误：${typeof data.running}`)
+		if (data.running == null) {
+			this.log('warn', `running 缺失`)
 			return false
 		}
-		if (typeof data.paused !== 'boolean') {
-			this.log('warn', `paused 类型错误：${typeof data.paused}`)
+		data.running = Boolean(data.running)
+		
+		if (data.paused == null) {
+			this.log('warn', `paused 缺失`)
 			return false
 		}
-		if (typeof data.remainingTime !== 'number') {
-			this.log('warn',`remainingTime 类型错误：${typeof data.remainingTime}`)
+		data.paused = Boolean(data.paused)
+		
+		if (data.remainingTime == null) {
+			this.log('warn', `remainingTime 缺失`)
 			return false
 		}
-		if (typeof data.totalTime !== 'number') {
-			this.log('warn', `totalTime 类型错误：${typeof data.totalTime}`)
+		data.remainingTime = Number(data.remainingTime)
+		if (isNaN(data.remainingTime)) {
+			this.log('warn', `remainingTime 无法转换为数字`)
+			return false
+		}
+		
+		if (data.remainingTimeMs == null) {
+			this.log('warn', `remainingTimeMs 缺失`)
+			return false
+		}
+		data.remainingTimeMs = Number(data.remainingTimeMs)
+		if (isNaN(data.remainingTimeMs)) {
+			this.log('warn', `remainingTimeMs 无法转换为数字`)
+			return false
+		}
+		
+		if (data.totalTime == null) {
+			this.log('warn', `totalTime 缺失`)
+			return false
+		}
+		data.totalTime = Number(data.totalTime)
+		if (isNaN(data.totalTime)) {
+			this.log('warn', `totalTime 无法转换为数字`)
 			return false
 		}
 		
@@ -776,12 +1102,6 @@ class TinyCountdownInstance extends InstanceBase {
 		if (data.remainingTime < 0) {
 			this.log('error', `剩余时间不能为负数：${data.remainingTime}`)
 			return false
-		}
-		
-		// 逻辑验证：暂停时必须是未运行状态（自动修正）
-		if (data.paused && data.running) {
-			this.log('warn', '数据异常：运行状态下不能暂停，自动修正 paused=false')
-			data.paused = false
 		}
 		
 		// 逻辑验证：总时间应该大于等于剩余时间（仅警告，不阻止更新）
@@ -806,67 +1126,76 @@ class TinyCountdownInstance extends InstanceBase {
 			updates.running = data.running.toString()
 		}
 		
-		// 暂停状态（仅当未运行时有效）
-		if (data.paused !== undefined && !data.running && this.connectionState.paused !== data.paused) {
+		// 暂停状态（仅当未运行时有效；运行时必须为 false）
+		if (data.running && this.connectionState.paused) {
+			this.connectionState.paused = false
+			updates.paused = 'false'
+		} else if (data.paused !== undefined && !data.running && this.connectionState.paused !== data.paused) {
 			this.connectionState.paused = data.paused
 			updates.paused = data.paused.toString()
 		}
 		
-		// 剩余时间（秒）- 直接透传软件端数据，同时更新格式化变量
-		if (data.remainingTime !== undefined && this.connectionState.remainingTime !== data.remainingTime) {
-			this.connectionState.remainingTime = data.remainingTime
-			const totalSeconds = Math.floor(data.remainingTime)  // 向下取整，直接使用整数部分
-			updates.remainingTime = totalSeconds.toString()
-					
-			// 内联格式化：HH:MM:SS
-			const hours = Math.floor(totalSeconds / 3600)
-			const minutes = Math.floor((totalSeconds % 3600) / 60)
-			const seconds = totalSeconds % 60
-			updates.remainingTimeFormatted = 
-				`${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
-					
-			// 内联格式化：MM:SS
-			const totalMinutes = Math.floor(totalSeconds / 60)
-			const secs = totalSeconds % 60
-			updates.time= `${totalMinutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+		// 剩余时间（毫秒级）：每次同步都更新，以保证本地插值基准准确
+		if (data.remainingTimeMs !== undefined) {
+			this.connectionState.remainingTimeMs = data.remainingTimeMs
+			this.connectionState.lastSyncTime = Date.now()
+			updates.remainingTimeMs = data.remainingTimeMs.toString()
 		}
 		
-		// 总时间
-		if (data.totalTime !== undefined && this.connectionState.totalTime !== data.totalTime) {
-			this.connectionState.totalTime = data.totalTime
-			updates.totalTime = data.totalTime.toString()
+		// 根据运行状态启动或停止本地插值
+		const isRunning = this.connectionState.running && !this.connectionState.paused
+		if (isRunning) {
+			this.startInterpolation()
+		} else {
+			this.stopInterpolation()
+			// 非运行状态直接刷新显示
+			const displayMs = Math.max(0, this.connectionState.remainingTimeMs)
+			const displaySec = Math.floor(displayMs / 1000)
+			if (this.connectionState.remainingTime !== displaySec) {
+				this.connectionState.remainingTime = displaySec
+				updates.remainingTime = displaySec.toString()
+				updates.remainingTimeFormatted = formatTimeHHMMSS(displaySec)
+				updates.time = formatTimeMMSS(displaySec)
+				this.connectionState.time = updates.time
+			}
 		}
 		
-		// 闪烁模式
-		if (data.blink !== undefined && this.connectionState.blink !== data.blink) {
-			this.connectionState.blink = data.blink
-			updates.blink = data.blink.toString()
+		// 简单布尔/数值字段统一处理
+		const simpleFields = [
+			{ key: 'blink' },
+			{ key: 'top' },
+			{ key: 'fullscreen' },
+			{ key: 'windowVisible' },
+			{ key: 'ndi' },
+		]
+
+		for (const { key } of simpleFields) {
+			if (data[key] !== undefined && this.connectionState[key] !== data[key]) {
+				this.connectionState[key] = data[key]
+				updates[key] = data[key].toString()
+			}
 		}
-		
-		// 窗口置顶
-		if (data.top !== undefined && this.connectionState.top !== data.top) {
-			this.connectionState.top = data.top
-			updates.top = data.top.toString()
+
+		// 简单数值字段统一处理
+		const numericFields = [
+			{ key: 'port' },
+			{ key: 'totalTime' },
+		]
+
+		for (const { key } of numericFields) {
+			if (data[key] !== undefined && this.connectionState[key] !== data[key]) {
+				this.connectionState[key] = data[key]
+				updates[key] = data[key].toString()
+			}
 		}
-		
-		// 全屏模式
-		if (data.fullscreen !== undefined && this.connectionState.fullscreen !== data.fullscreen) {
-			this.connectionState.fullscreen = data.fullscreen
-			updates.fullscreen = data.fullscreen.toString()
+
+		// 分辨率索引及可读标签
+		if (data.resolution !== undefined && this.connectionState.resolution !== data.resolution) {
+			this.connectionState.resolution = data.resolution
+			updates.resolution = data.resolution.toString()
+			updates.resolutionLabel = RESOLUTION_MAP[updates.resolution] || 'Default'
 		}
-		
-		// 窗口可见性
-		if (data.windowVisible !== undefined && this.connectionState.windowVisible !== data.windowVisible) {
-			this.connectionState.windowVisible = data.windowVisible
-			updates.windowVisible = data.windowVisible.toString()
-		}
-		
-		// 服务器端口
-		if (data.port !== undefined && this.connectionState.port !== data.port) {
-			this.connectionState.port = data.port
-			updates.port = data.port.toString()
-		}
-		
+
 		// 仅在有变化时更新变量，减少不必要的操作
 		if (Object.keys(updates).length > 0) {
 			this.setVariableValues(updates)
@@ -875,45 +1204,172 @@ class TinyCountdownInstance extends InstanceBase {
 		}
 		
 		// 返回更新的内容（用于日志记录）
-		return Object.keys(updates).length > 0 ? updates : null
+		return updates
 	}
-	
-	
+
+	startInterpolation() {
+		if (this.interpolationInterval) {
+			return
+		}
+		this.interpolationInterval = setInterval(() => {
+			this.tickInterpolation()
+		}, 100) // 100ms 本地渲染间隔
+	}
+
+	stopInterpolation() {
+		clearInterval(this.interpolationInterval)
+		this.interpolationInterval = null
+	}
+
+	tickInterpolation() {
+		if (!this.connectionState.running || this.connectionState.paused) {
+			return
+		}
+
+		const elapsed = Date.now() - this.connectionState.lastSyncTime
+		const estimatedMs = Math.max(0, this.connectionState.remainingTimeMs - elapsed)
+		const estimatedSec = Math.floor(estimatedMs / 1000)
+
+		// 只有当秒级显示变化时才更新变量，避免 Companion 变量系统过载
+		if (this.connectionState.remainingTime !== estimatedSec) {
+			this.connectionState.remainingTime = estimatedSec
+			this.setVariableValues({
+				remainingTime: estimatedSec.toString(),
+				remainingTimeMs: estimatedMs.toString(),
+				remainingTimeFormatted: formatTimeHHMMSS(estimatedSec),
+				time: formatTimeMMSS(estimatedSec),
+			})
+			this.connectionState.time = formatTimeMMSS(estimatedSec)
+			this.checkFeedbacks()
+		}
+	}
 
 	startHeartbeat() {
-		if (this.heartbeatInterval) {
-			clearInterval(this.heartbeatInterval)
-		}
-		
+		clearInterval(this.heartbeatInterval)
 		this.heartbeatInterval = setInterval(() => {
-			if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+			if (this.isWebSocketConnected()) {
 				this.sendCommand('PING')
 			}
 		}, 10000) // 10 seconds
 	}
 
-	maybeReconnect() {
-		if (!this.isInitialized || !this.config.reconnect) {
+	stopHeartbeat() {
+		clearInterval(this.heartbeatInterval)
+		this.heartbeatInterval = null
+	}
+
+	// Single entry point for all reconnect/recovery scheduling.
+	// Callers can suggest a delay; if omitted, exponential backoff is used.
+	scheduleReconnect(delayMs = -1, reason = '') {
+		if (!this.isInitialized || !this.config.reconnect || this.closingIntentionally) {
 			return
 		}
-		
-		if (this.reconnectInterval) {
-			clearTimeout(this.reconnectInterval)
+
+		this.stopReconnect()
+
+		if (delayMs < 0) {
+			this.reconnectAttempt++
+			delayMs = computeReconnectDelay(this.reconnectAttempt)
 		}
-		
-		// 无限重连直到连接成功
-		this.reconnectCount++
-		this.log('info', `5 秒后重连中 (第 ${this.reconnectCount} 次尝试)`)
-		
-		this.reconnectInterval = setTimeout(() => {
+
+		const logReason = reason ? ` (${reason})` : ''
+		this.log('info', `${delayMs}ms 后重连中 (第 ${this.reconnectAttempt} 次尝试)${logReason}`)
+
+		this.reconnectTimeout = setTimeout(() => {
+			this.executeReconnect()
+		}, delayMs)
+	}
+
+	// Called from ws.on('close') so we can interpret the close reason.
+	scheduleReconnectFromClose(closeCode = -1, closeReason = '') {
+		if (!this.isInitialized || !this.config.reconnect || this.closingIntentionally) {
+			return
+		}
+
+		// Server explicitly rejected our token (password changed, etc.) -> re-auth immediately.
+		if (this.authToken && isTokenInvalidated(closeCode, closeReason)) {
+			this.log('warn', '服务器拒绝当前令牌，立即重新认证')
+			this.reconnectAttempt = 0
+			this.clearAuthState()
+			this.scheduleReconnect(0, '令牌失效，立即重新认证')
+			return
+		}
+
+		// After several failed attempts with an existing token, the token is probably stale.
+		if (this.authToken && this.reconnectAttempt >= MAX_TOKEN_RECONNECT_ATTEMPTS) {
+			this.log('warn', `连续 ${MAX_TOKEN_RECONNECT_ATTEMPTS} 次使用旧令牌重连失败，尝试重新认证`)
+			this.reconnectAttempt = 0
+			this.clearAuthState()
+			this.scheduleReconnect(0, '旧令牌重连失败，重新认证')
+			return
+		}
+
+		// Fast path: token is still valid and this is the first disconnect since last successful
+		// connection. Reconnect WebSocket immediately (0ms) without re-authentication.
+		// Increment reconnectAttempt so that if this fast attempt fails, subsequent
+		// retries fall through to exponential backoff instead of looping at 0ms.
+		if (this.authToken && this.reconnectAttempt === 0) {
+			this.reconnectAttempt = 1
+			this.scheduleReconnect(0, '快速重连（令牌有效，跳过认证）')
+			return
+		}
+
+		this.scheduleReconnect(-1, closeReason)
+	}
+
+	// Decide whether to authenticate or open a WebSocket based on current state.
+	executeReconnect() {
+		if (!this.isInitialized) {
+			return
+		}
+
+		if (!this.isAuthenticated) {
+			this.authenticate()
+		} else {
 			this.setupWebSocket()
-		}, 5000)
+		}
+	}
+
+	clearAuthState() {
+		this.isAuthenticated = false
+		this.authToken = null
+		this.setVariableValues({ authenticated: 'false' })
+		this.checkFeedbacks()
+	}
+
+	stopConnectionTimeout() {
+		if (this.connectionTimeout) {
+			clearTimeout(this.connectionTimeout)
+			this.connectionTimeout = null
+		}
+	}
+
+	// Reset flags and timers tied to an in-flight connection attempt.
+	finishConnectionAttempt() {
+		this.isConnecting = false
+		this.stopConnectionTimeout()
+	}
+
+	stopReconnect() {
+		if (this.reconnectTimeout) {
+			clearTimeout(this.reconnectTimeout)
+			this.reconnectTimeout = null
+		}
+	}
+
+	isWebSocketConnected() {
+		return this.ws && this.ws.readyState === WebSocket.OPEN
 	}
 
 	async sendCommand(command) {
-		if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+		if (!this.isAuthenticated) {
+			this.log('warn', `无法发送命令 "${command}": 未登录`)
+			return
+		}
+
+		if (!this.isWebSocketConnected()) {
 			this.log('warn', `无法发送命令 "${command}": WebSocket 未连接`)
-			return false
+			return
 		}
 		
 		try {
@@ -922,12 +1378,17 @@ class TinyCountdownInstance extends InstanceBase {
 				this.log('debug', `正在发送：${command}`)
 			}
 			this.ws.send(command)
-			return true
 		} catch (error) {
 			this.log('error', `发送命令失败：${error.message}`)
-			return false
 		}
 	}
 }
 
-runEntrypoint(TinyCountdownInstance, upgradeScripts)
+export { TinyCountdownInstance }
+
+// Only start the Companion entrypoint when the host has set up the expected
+// environment. This lets tests import the class without triggering the IPC
+// runtime, while keeping normal Companion execution unchanged.
+if (process.env.MODULE_MANIFEST) {
+	runEntrypoint(TinyCountdownInstance, upgradeScripts)
+}
