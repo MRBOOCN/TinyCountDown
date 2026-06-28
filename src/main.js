@@ -1126,13 +1126,11 @@ class TinyCountdownInstance extends InstanceBase {
 			updates.running = data.running.toString()
 		}
 		
-		// 暂停状态（仅当未运行时有效；运行时必须为 false）
-		if (data.running && this.connectionState.paused) {
-			this.connectionState.paused = false
-			updates.paused = 'false'
-		} else if (data.paused !== undefined && !data.running && this.connectionState.paused !== data.paused) {
-			this.connectionState.paused = data.paused
-			updates.paused = data.paused.toString()
+		// 暂停状态：仅当未运行时才可能为 true
+		const paused = !data.running && !!data.paused
+		if (this.connectionState.paused !== paused) {
+			this.connectionState.paused = paused
+			updates.paused = paused.toString()
 		}
 		
 		// 剩余时间（毫秒级）：每次同步都更新，以保证本地插值基准准确
@@ -1160,29 +1158,10 @@ class TinyCountdownInstance extends InstanceBase {
 			}
 		}
 		
-		// 简单布尔/数值字段统一处理
-		const simpleFields = [
-			{ key: 'blink' },
-			{ key: 'top' },
-			{ key: 'fullscreen' },
-			{ key: 'windowVisible' },
-			{ key: 'ndi' },
-		]
+		// 简单字段统一处理
+		const fields = ['blink', 'top', 'fullscreen', 'windowVisible', 'ndi', 'port', 'totalTime']
 
-		for (const { key } of simpleFields) {
-			if (data[key] !== undefined && this.connectionState[key] !== data[key]) {
-				this.connectionState[key] = data[key]
-				updates[key] = data[key].toString()
-			}
-		}
-
-		// 简单数值字段统一处理
-		const numericFields = [
-			{ key: 'port' },
-			{ key: 'totalTime' },
-		]
-
-		for (const { key } of numericFields) {
+		for (const key of fields) {
 			if (data[key] !== undefined && this.connectionState[key] !== data[key]) {
 				this.connectionState[key] = data[key]
 				updates[key] = data[key].toString()
