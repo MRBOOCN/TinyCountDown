@@ -77,7 +77,6 @@ Bitfocus Companion 模块，用于控制 TinyCountdown 应用程序。
 - `running`：当前运行状态（true/false）
 - `paused`：当前暂停状态（true/false）
 - `remainingTime`：剩余时间（秒）
-- `remainingTimeMs`：剩余时间（毫秒，用于高精度同步）
 - `totalTime`：总时间（秒）
 - `time`：格式化时间字符串（HH:MM:SS 或 MM:SS）
 - `blink`：闪烁模式状态（true/false）

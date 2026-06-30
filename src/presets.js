@@ -2,7 +2,7 @@
  * Preset definitions for TinyCountdown module
  */
 
-import { COLORS, RESOLUTION_MAP } from './constants.js'
+import { COLORS, RESOLUTION_MAP, FPS_MAP } from './constants.js'
 
 const SIZES = {
 	default: '24',
@@ -12,13 +12,23 @@ const SIZES = {
 
 const RESOLUTION_PRESET_IDS = {
 	'-1': 'default',
-	'0': '1366',
-	'1': '1920',
-	'2': '2560',
-	'3': '3840',
+	0: '1366',
+	1: '1920',
+	2: '2560',
+	3: '3840',
 }
 
-function createActionPreset({ category, name, text, size, actionId, options, feedbackId, feedbackOptions, activeStyle = {} }) {
+function createActionPreset({
+	category,
+	name,
+	text,
+	size,
+	actionId,
+	options,
+	feedbackId,
+	feedbackOptions,
+	activeStyle = {},
+}) {
 	const preset = {
 		type: 'button',
 		category,
@@ -59,6 +69,39 @@ function createTimePreset(id, text, minutes, presets) {
 		actionId: 'set_time',
 		options: { hours: 0, minutes, seconds: 0 },
 	})
+}
+
+function createModePreset(id, text, mode, presets) {
+	presets[id] = createActionPreset({
+		category: '模式',
+		name: '',
+		text,
+		size: '16',
+		actionId: 'set_mode',
+		options: { operation: mode },
+		feedbackId: 'mode_status',
+		feedbackOptions: { mode },
+		activeStyle: {
+			bgcolor: COLORS.yellow,
+			color: COLORS.black,
+		},
+	})
+}
+
+function createDisplayPreset(id, text, size) {
+	return {
+		type: 'button',
+		category: '状态显示',
+		name: '',
+		style: {
+			text,
+			size,
+			color: COLORS.white,
+			bgcolor: COLORS.black,
+		},
+		steps: [],
+		feedbacks: [],
+	}
 }
 
 /**
@@ -182,19 +225,30 @@ export function GetPresetsList(instance) {
 		options: { operation: 'subtract', hours: 0, minutes: 1, seconds: 0 },
 	})
 
-	// 分辨率当前标签（动态显示当前分辨率名称）
-	presets['resolution_label'] = {
-		type: 'button',
-		category: '分辨率',
+	// NDI 切换
+	presets['ndi_toggle'] = createActionPreset({
+		category: '功能控制',
 		name: '',
-		style: {
-			text: '$(Tinycountdown:resolutionLabel)',
-			size: SIZES.resolution,
-			color: COLORS.white,
-			bgcolor: COLORS.black,
-		},
-		steps: [],
-		feedbacks: [],
+		text: 'NDI',
+		size: SIZES.small,
+		actionId: 'toggle_ndi',
+		options: { operation: 'toggle' },
+		feedbackId: 'ndi_status',
+		feedbackOptions: {},
+	})
+
+	// NDI 帧率按钮循环生成
+	for (const [fpsId, label] of Object.entries(FPS_MAP)) {
+		presets[`ndi_fps_${fpsId}`] = createActionPreset({
+			category: 'NDI 帧率',
+			name: '',
+			text: label,
+			size: SIZES.small,
+			actionId: 'set_ndi_fps',
+			options: { fps: fpsId },
+			feedbackId: 'ndi_fps_status',
+			feedbackOptions: { fps: fpsId },
+		})
 	}
 
 	// 分辨率按钮循环生成
@@ -211,62 +265,46 @@ export function GetPresetsList(instance) {
 		})
 	}
 
-	// NDI 切换
-	presets['ndi_toggle'] = createActionPreset({
-		category: 'NDI',
+	// ==================== 模式 ====================
+	// 当前模式（切换）
+	presets['mode_toggle'] = createActionPreset({
+		category: '模式',
 		name: '',
-		text: 'NDI',
-		size: SIZES.small,
-		actionId: 'toggle_ndi',
+		text: '$(Tinycountdown:currentMode)',
+		size: '13',
+		actionId: 'set_mode',
 		options: { operation: 'toggle' },
-		feedbackId: 'ndi_status',
-		feedbackOptions: {},
 	})
 
-	// ==================== 状态显示 ====================
-	// 46:13 (分：秒格式)
-	presets['display_mmss'] = {
-		type: 'button',
-		category: '状态显示',
-		name: '',
-		style: {
-			text: '$(Tinycountdown:time)',
-			color: COLORS.white,
-			bgcolor: COLORS.black,
-		},
-		steps: [],
-		feedbacks: [],
-	}
+	// 倒计时
+	createModePreset('mode_countdown', '倒计时', 'countdown', presets)
 
-	// 46:13 (时：分：秒格式)
-	presets['display_hhmmss'] = {
-		type: 'button',
-		category: '状态显示',
-		name: '',
-		style: {
-			text: '$(Tinycountdown:remainingTimeFormatted)',
-			size: '15',
-			color: COLORS.white,
-			bgcolor: COLORS.black,
-		},
-		steps: [],
-		feedbacks: [],
-	}
+	// 正计时
+	createModePreset('mode_countup', '正计时', 'countup', presets)
+
+	// 时间
+	createModePreset('mode_time', '时间', 'time', presets)
+
+	// ==================== 状态显示 ====================
+	// 时间显示（智能格式：MM:SS / HH:MM:SS）
+	presets['display_mmss'] = createDisplayPreset('display_mmss', '$(Tinycountdown:time)', '16')
+
+	// 当前分辨率（动态显示当前分辨率名称）
+	presets['resolution_label'] = createDisplayPreset(
+		'resolution_label',
+		'$(Tinycountdown:resolutionLabel)',
+		SIZES.resolution,
+	)
+
+	// 当前 NDI 帧率
+	presets['ndi_fps_label'] = createDisplayPreset(
+		'ndi_fps_label',
+		'$(Tinycountdown:ndiFps)p',
+		SIZES.small,
+	)
 
 	// 2773 (端口号)
-	presets['display_port'] = {
-		type: 'button',
-		category: '状态显示',
-		name: '',
-		style: {
-			text: '$(Tinycountdown:port)',
-			size: 'auto',
-			color: COLORS.white,
-			bgcolor: COLORS.black,
-		},
-		steps: [],
-		feedbacks: [],
-	}
+	presets['display_port'] = createDisplayPreset('display_port', '$(Tinycountdown:port)', 'auto')
 
 	return presets
 }

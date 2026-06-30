@@ -119,7 +119,7 @@ function createExpectedStateFeedback(
 	choices = [
 		{ id: 'true', label: '激活' },
 		{ id: 'false', label: '未激活' },
-	],
+	]
 ) {
 	const optionId = `state_${stateKey}`
 	return {
@@ -444,29 +444,10 @@ class TinyCountdownInstance extends InstanceBase {
 					},
 				],
 				callback: async (action) => {
-					let command, logText
-					switch (action.options.operation) {
-						case 'toggle':
-							if (this.connectionState.running) {
-								command = 'stop'
-								logText = COUNTDOWN_LOG_TEXTS.stop
-							} else {
-								command = 'start'
-								logText = COUNTDOWN_LOG_TEXTS.start
-							}
-							break
-						case 'start':
-							command = 'start'
-							logText = COUNTDOWN_LOG_TEXTS.start
-							break
-						case 'stop':
-							command = 'stop'
-							logText = COUNTDOWN_LOG_TEXTS.stop
-							break
-					}
-					await sendCommand(command)
-					this.log('info', `操作：${logText}`)
-				}},
+				let command, logText
+				await sendCommand(command)
+				this.log('info', `操作：${logText}`)
+			},
 			reset_countdown: {
 				name: '重置倒计时',
 				options: [],
@@ -1154,9 +1135,6 @@ class TinyCountdownInstance extends InstanceBase {
 			if (data[key] !== undefined && this.connectionState[key] !== data[key]) {
 				this.connectionState[key] = data[key]
 				updates[key] = data[key].toString()
-				if (key === 'windowVisible') {
-					this.log('debug', `窗口可见性变化：${data[key] ? '可见' : '隐藏'}`)
-				}
 			}
 		}
 

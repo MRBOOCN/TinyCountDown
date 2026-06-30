@@ -151,7 +151,6 @@
 - `$(Tinycountdown:running)` - 运行状态（true/false）
 - `$(Tinycountdown:paused)` - 暂停状态（true/false）
 - `$(Tinycountdown:remainingTime)` - 剩余秒数
-- `$(Tinycountdown:remainingTimeMs)` - 剩余时间毫秒数（用于高精度同步）
 - `$(Tinycountdown:remainingTimeFormatted)` - 格式化剩余时间（HH:MM:SS）
 - `$(Tinycountdown:totalTime)` - 总秒数
 - `$(Tinycountdown:time)` - 格式化时间显示（MM:SS）
